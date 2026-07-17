@@ -1,0 +1,16 @@
+node_modules       # good — never commit dependencies, they're reinstalled via npm install
+.env               # good — keeps secrets/API keys out of GitHub
+.env.*             # covers .env.local, .env.production, etc. — same reasoning as .env
+uploads            # good if this holds user-uploaded files you don't want in git
+*.log              # good — skips log files
+.DS_Store          # good — skips Mac OS junk files
+
+# a few more worth adding:
+dist               # build output, if you compile/bundle anything
+build
+coverage           # test coverage reports (nyc, jest --coverage, etc.)
+*.tgz              # packaged npm tarballs
+.vscode/           # editor-specific settings (unless you intentionally share them)
+.idea/
+npm-debug.log*     # npm's own crash logs, distinct from your app's *.log
+package-lock.json  # ONLY if you intentionally don't want to lock versions — most teams keep this committed
