@@ -6,6 +6,7 @@ const catchAsync = require('../utils/catchAsync');
 const ApiError = require('../utils/apiError');
 const ApiResponse = require('../utils/apiResponse');
 const { ROLES } = require('../constants/enums');
+const { resolveReferrer } = require('../services/referral.service');
 
 function issueTokens(res, user) {
   const accessToken = generateAccessToken(user._id, user.role);
@@ -22,12 +23,14 @@ function issueTokens(res, user) {
 }
 
 const register = catchAsync(async (req, res) => {
-  const { name, email, password, phone, role } = req.body;
+  const { name, email, password, phone, role, referralCode } = req.body;
 
   const existing = await User.findOne({ email });
   if (existing) throw ApiError.conflict('An account with this email already exists');
 
-  const user = await User.create({ name, email, password, phone, role, roles: [role] });
+  const referrer = referralCode ? await resolveReferrer(referralCode) : null;
+
+  const user = await User.create({ name, email, password, phone, role, roles: [role], referredBy: referrer?._id || null });
 
   // create the role-specific profile alongside the base user
   if (role === ROLES.CREATOR) {
@@ -145,7 +148,7 @@ const upgradeRole = catchAsync(async (req, res) => {
 
 const googleAuth = catchAsync(async (req, res) => {
   console.log('[google-auth backend] Request received. Has idToken:', Boolean(req.body.idToken), ', role:', req.body.role);
-  const { idToken, role: requestedRole } = req.body;
+  const { idToken, role: requestedRole, referralCode } = req.body;
   if (!idToken) throw ApiError.badRequest('Missing Google ID token');
 
   const { getFirebaseAdmin } = require('../config/firebase');
@@ -180,6 +183,7 @@ const googleAuth = catchAsync(async (req, res) => {
     const role = Object.values(ROLES).includes(requestedRole) ? requestedRole : ROLES.FAN;
     const randomPassword = crypto.randomBytes(24).toString('hex');
     const finalName = name || email.split('@')[0];
+    const referrer = referralCode ? await resolveReferrer(referralCode) : null;
 
     user = await User.create({
       name: finalName,
@@ -190,6 +194,7 @@ const googleAuth = catchAsync(async (req, res) => {
       googleId: uid,
       role,
       roles: [role],
+      referredBy: referrer?._id || null,
     });
 
     // Same role-specific profile creation as the normal email/password register flow.

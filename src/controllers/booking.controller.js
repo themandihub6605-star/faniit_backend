@@ -69,7 +69,12 @@ const verifyBookingPayment = catchAsync(async (req, res) => {
   if (!booking) throw ApiError.notFound('Booking not found');
   if (!booking.user.equals(req.user._id)) throw ApiError.forbidden('This booking does not belong to you');
 
-  const { platformCommission, netAmount } = await walletService.splitEarnings(booking.amountPaid, booking.session.creator._id);
+  const { platformCommission, agencyCommission, referralCommission, netAmount } = await walletService.splitEarnings(
+    booking.amountPaid,
+    booking.session.creator._id,
+    'Booking',
+    booking._id
+  );
 
   const transaction = await Transaction.create({
     type: TRANSACTION_TYPE.SESSION_PAYMENT,
@@ -78,6 +83,8 @@ const verifyBookingPayment = catchAsync(async (req, res) => {
     to: booking.session.creator.user,
     amount: booking.amountPaid,
     platformCommission,
+    agencyCommission,
+    referralCommission,
     netAmount,
     relatedModel: 'Booking',
     relatedId: booking._id,

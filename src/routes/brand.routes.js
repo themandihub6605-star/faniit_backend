@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const {
+  listBrands,
   getBrandById,
   getBrandBySlug,
   getMyProfile,
@@ -13,6 +14,7 @@ const {
 const { protect } = require('../middlewares/auth.middleware');
 const { uploadImage } = require('../middlewares/upload.middleware');
 
+router.get('/', listBrands);
 router.get('/me', protect, getMyProfile);
 router.get('/me/dashboard', protect, getMyDashboard);
 router.patch('/me', protect, updateMyProfile);

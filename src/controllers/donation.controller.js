@@ -33,7 +33,12 @@ const verifyDonation = catchAsync(async (req, res) => {
   const session = await Session.findById(sessionId).populate('creator');
   if (!session) throw ApiError.notFound('Session not found');
 
-  const { platformCommission, netAmount } = await walletService.splitEarnings(amount, session.creator._id);
+  const { platformCommission, agencyCommission, referralCommission, netAmount } = await walletService.splitEarnings(
+    amount,
+    session.creator._id,
+    'Session',
+    session._id
+  );
 
   const transaction = await Transaction.create({
     type: TRANSACTION_TYPE.DONATION,
@@ -42,6 +47,8 @@ const verifyDonation = catchAsync(async (req, res) => {
     to: session.creator.user,
     amount,
     platformCommission,
+    agencyCommission,
+    referralCommission,
     netAmount,
     relatedModel: 'Session',
     relatedId: session._id,

@@ -1,13 +1,17 @@
 const { User, CreatorProfile, AgencyProfile } = require('../models');
 const env = require('../config/env');
+const { creditReferralCommission } = require('./referral.service');
 
 /**
  * Splits a gross amount into platform commission, agency commission (if the
- * creator is under an agency) and the creator's net take-home. All amounts
- * in paise. Percentages are read from env / the agency's own record so this
- * never has to be touched when rates change.
+ * creator is under an agency), referral commission (if the creator was
+ * referred by someone under the referral program) and the creator's net
+ * take-home. All amounts in paise.
+ *
+ * `relatedModel`/`relatedId` are passed through so the referral commission
+ * transaction can point back to the session/campaign that generated it.
  */
-async function splitEarnings(grossAmount, creatorProfileId) {
+async function splitEarnings(grossAmount, creatorProfileId, relatedModel = null, relatedId = null) {
   const platformCommission = Math.round((grossAmount * env.platform.commissionPercent) / 100);
   let remaining = grossAmount - platformCommission;
 
@@ -26,7 +30,15 @@ async function splitEarnings(grossAmount, creatorProfileId) {
     }
   }
 
-  return { platformCommission, agencyCommission, netAmount: remaining };
+  // Separate from the agency-link commission above — this is the generic
+  // referral program (e.g. one Creator referred another Creator's signup).
+  let referralCommission = 0;
+  if (creator?.user) {
+    referralCommission = await creditReferralCommission(creator.user, remaining, relatedModel, relatedId);
+    remaining -= referralCommission;
+  }
+
+  return { platformCommission, agencyCommission, referralCommission, netAmount: remaining };
 }
 
 /** Credits a creator's wallet + running earnings totals. */

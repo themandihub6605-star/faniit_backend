@@ -13,6 +13,7 @@ const transactionSchema = new mongoose.Schema(
     amount: { type: Number, required: true }, // gross amount, in paise
     platformCommission: { type: Number, default: 0 },
     agencyCommission: { type: Number, default: 0 },
+    referralCommission: { type: Number, default: 0 },
     netAmount: { type: Number, default: 0 }, // amount actually credited to `to`
 
     // polymorphic reference to whatever this transaction is for

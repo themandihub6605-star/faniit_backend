@@ -2,6 +2,7 @@ const { Campaign, Transaction, CreatorProfile } = require('../models');
 const { TRANSACTION_TYPE, TRANSACTION_STATUS, CAMPAIGN_STATUS } = require('../constants/enums');
 const walletService = require('./wallet.service');
 const notificationService = require('./notification.service');
+const { creditReferralCommission } = require('./referral.service');
 const ApiError = require('../utils/apiError');
 
 /**
@@ -30,6 +31,12 @@ async function fundEscrow({ campaignId, brandUserId, amount, razorpayOrderId, ra
   campaign.status = CAMPAIGN_STATUS.IN_PROGRESS;
   await campaign.save();
 
+  // If this brand was referred (e.g. by a Creator, per the creatorToBrand
+  // commission tier), the referrer earns a cut of the campaign spend itself
+  // — this is real revenue the brand generated on the platform, separate
+  // from whatever the assigned creator later earns from the same campaign.
+  await creditReferralCommission(brandUserId, amount, 'Campaign', campaign._id);
+
   return transaction;
 }
 
@@ -45,9 +52,11 @@ async function releaseEscrow({ campaignId, releasedByUserId = null }) {
   if (campaign.isEscrowReleased) throw ApiError.badRequest('Escrow has already been released');
   if (!campaign.assignedCreator) throw ApiError.badRequest('Campaign has no assigned creator');
 
-  const { platformCommission, agencyCommission, netAmount } = await walletService.splitEarnings(
+  const { platformCommission, agencyCommission, referralCommission, netAmount } = await walletService.splitEarnings(
     campaign.budget,
-    campaign.assignedCreator
+    campaign.assignedCreator,
+    'Campaign',
+    campaign._id
   );
 
   const creator = await CreatorProfile.findById(campaign.assignedCreator).populate('user');
@@ -60,6 +69,7 @@ async function releaseEscrow({ campaignId, releasedByUserId = null }) {
     amount: campaign.budget,
     platformCommission,
     agencyCommission,
+    referralCommission,
     netAmount,
     relatedModel: 'Campaign',
     relatedId: campaign._id,

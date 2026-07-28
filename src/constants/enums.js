@@ -41,6 +41,7 @@ const TRANSACTION_TYPE = Object.freeze({
   CAMPAIGN_ESCROW_DEPOSIT: 'campaign_escrow_deposit',
   CAMPAIGN_PAYOUT: 'campaign_payout',
   AGENCY_COMMISSION: 'agency_commission',
+  REFERRAL_COMMISSION: 'referral_commission',
   PLATFORM_COMMISSION: 'platform_commission',
   REFUND: 'refund',
 });

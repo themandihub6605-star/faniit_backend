@@ -2,17 +2,20 @@ const {
   User,
   CreatorProfile,
   BrandProfile,
+  AgencyProfile,
   Session,
   Campaign,
   Transaction,
   Review,
   Category,
+  ReferralConfig,
 } = require('../models');
 const escrowService = require('../services/escrow.service');
+const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { VERIFICATION_STATUS, TRANSACTION_STATUS } = require('../constants/enums');
+const { VERIFICATION_STATUS, TRANSACTION_STATUS, ROLES } = require('../constants/enums');
 
 // ---------- Users ----------
 
@@ -66,6 +69,53 @@ const verifyBrand = catchAsync(async (req, res) => {
 
 // ---------- Agency approval ----------
 
+/**
+ * POST /api/admin/agencies — Admin creates an Agency account directly
+ * (name, email, temporary password, commission rate). No self-registration
+ * involved; the agency logs in with these credentials on the separate
+ * Agency Panel and is expected to change the password after first login.
+ */
+const createAgency = catchAsync(async (req, res) => {
+  const { agencyName, ownerName, email, password, mobile, city, state, commissionPercent } = req.body;
+
+  if (!agencyName || !email || !password) {
+    throw ApiError.badRequest('agencyName, email and password are required');
+  }
+  if (password.length < 8) throw ApiError.badRequest('Password must be at least 8 characters');
+
+  const existing = await User.findOne({ email });
+  if (existing) throw ApiError.conflict('An account with this email already exists');
+
+  const user = await User.create({
+    name: ownerName || agencyName,
+    email,
+    password,
+    role: ROLES.AGENCY,
+    roles: [ROLES.AGENCY],
+    isEmailVerified: true,
+  });
+
+  const agency = await AgencyProfile.create({
+    user: user._id,
+    agencyName,
+    ownerName: ownerName || '',
+    mobile: mobile || '',
+    city: city || '',
+    state: state || '',
+    commissionPercent: commissionPercent !== undefined ? commissionPercent : 5,
+    referralCode: generateSlug(agencyName).toUpperCase(),
+    // Admin created this directly, so it's already trusted — no pending
+    // approval step needed like the self-registration flow has.
+    verificationStatus: VERIFICATION_STATUS.VERIFIED,
+  });
+
+  return new ApiResponse(
+    201,
+    { user: user.toSafeObject(), agency },
+    'Agency account created — share these credentials with them so they can log in and change their password'
+  ).send(res);
+});
+
 const listAgencies = catchAsync(async (req, res) => {
   const { status } = req.query; // 'pending' | 'verified' | 'rejected' | 'unverified' | omitted = all
   const { AgencyProfile } = require('../models');
@@ -74,6 +124,31 @@ const listAgencies = catchAsync(async (req, res) => {
 
   const agencies = await AgencyProfile.find(filter).populate('user', 'name email avatarUrl').sort({ createdAt: -1 });
   return new ApiResponse(200, agencies, 'Agencies fetched').send(res);
+});
+
+/**
+ * PATCH /api/admin/agencies/:id/set-password — the agency already exists
+ * (they registered on the main website via Google and got approved there);
+ * Google sign-ups don't have a password, so this is how Admin assigns one
+ * for logging into the separate Agency Panel. Admin then shares the
+ * agency's existing email + this new password with them.
+ */
+const setAgencyPassword = catchAsync(async (req, res) => {
+  const { password } = req.body;
+  if (!password || password.length < 8) throw ApiError.badRequest('Password must be at least 8 characters');
+
+  const agency = await AgencyProfile.findById(req.params.id).populate('user');
+  if (!agency) throw ApiError.notFound('Agency not found');
+  if (!agency.user) throw ApiError.notFound('This agency has no linked user account');
+
+  agency.user.password = password; // pre-save hook hashes it
+  await agency.user.save();
+
+  return new ApiResponse(
+    200,
+    { email: agency.user.email, password },
+    'Password set — share this email and password with the agency to log into the Agency Panel'
+  ).send(res);
 });
 
 const verifyAgency = catchAsync(async (req, res) => {
@@ -220,6 +295,26 @@ const deleteCategory = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Category removed').send(res);
 });
 
+// ---------- Referral commission configuration ----------
+
+const getReferralConfig = catchAsync(async (req, res) => {
+  const config = await ReferralConfig.getSingleton();
+  return new ApiResponse(200, config, 'Referral config fetched').send(res);
+});
+
+const updateReferralConfig = catchAsync(async (req, res) => {
+  const { agentToAgentPercent, agentToBrandOrCreatorPercent, creatorToCreatorPercent, creatorToBrandPercent } = req.body;
+  const config = await ReferralConfig.getSingleton();
+
+  if (agentToAgentPercent !== undefined) config.agentToAgentPercent = agentToAgentPercent;
+  if (agentToBrandOrCreatorPercent !== undefined) config.agentToBrandOrCreatorPercent = agentToBrandOrCreatorPercent;
+  if (creatorToCreatorPercent !== undefined) config.creatorToCreatorPercent = creatorToCreatorPercent;
+  if (creatorToBrandPercent !== undefined) config.creatorToBrandPercent = creatorToBrandPercent;
+
+  await config.save();
+  return new ApiResponse(200, config, 'Referral config updated').send(res);
+});
+
 module.exports = {
   listUsers,
   suspendUser,
@@ -227,8 +322,12 @@ module.exports = {
   listPendingVerifications,
   verifyCreator,
   verifyBrand,
+  createAgency,
+  setAgencyPassword,
   listAgencies,
   verifyAgency,
+  getReferralConfig,
+  updateReferralConfig,
   listAllSessions,
   removeSession,
   listAllCampaigns,

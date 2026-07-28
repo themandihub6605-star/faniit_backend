@@ -20,8 +20,14 @@ router.patch('/verifications/creator/:id', admin.verifyCreator);
 router.patch('/verifications/brand/:id', admin.verifyBrand);
 
 // Agency approval
+router.post('/agencies', admin.createAgency);
 router.get('/agencies', admin.listAgencies);
 router.patch('/agencies/:id/verify', admin.verifyAgency);
+router.patch('/agencies/:id/set-password', admin.setAgencyPassword);
+
+// Referral commission config
+router.get('/referral-config', admin.getReferralConfig);
+router.patch('/referral-config', admin.updateReferralConfig);
 
 // Content moderation
 router.get('/sessions', admin.listAllSessions);

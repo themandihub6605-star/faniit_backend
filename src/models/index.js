@@ -18,4 +18,5 @@ module.exports = {
   Message: require('./Message.model'),
   Gift: require('./Gift.model'),
   Post: require('./Post.model'),
+  ReferralConfig: require('./ReferralConfig.model'),
 };

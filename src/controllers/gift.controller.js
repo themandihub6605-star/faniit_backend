@@ -32,7 +32,12 @@ const verifyGift = catchAsync(async (req, res) => {
   const creator = await CreatorProfile.findById(creatorId).populate('user');
   if (!creator) throw ApiError.notFound('Creator not found');
 
-  const { platformCommission, netAmount } = await walletService.splitEarnings(amount, creator._id);
+  const { platformCommission, agencyCommission, referralCommission, netAmount } = await walletService.splitEarnings(
+    amount,
+    creator._id,
+    null,
+    null
+  );
 
   const transaction = await Transaction.create({
     type: TRANSACTION_TYPE.GIFT,
@@ -41,6 +46,8 @@ const verifyGift = catchAsync(async (req, res) => {
     to: creator.user._id,
     amount,
     platformCommission,
+    agencyCommission,
+    referralCommission,
     netAmount,
     razorpayOrderId,
     razorpayPaymentId,

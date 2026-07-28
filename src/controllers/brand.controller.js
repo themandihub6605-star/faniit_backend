@@ -5,6 +5,29 @@ const ApiError = require('../utils/apiError');
 const generateSlug = require('../utils/slugify');
 const { ROLES, TRANSACTION_TYPE } = require('../constants/enums');
 
+/** GET /api/brands — public discovery listing, same pattern as listCreators. */
+const listBrands = catchAsync(async (req, res) => {
+  const { industry, location, search, page = 1, limit = 20 } = req.query;
+
+  const filter = { verificationStatus: { $ne: 'rejected' } };
+  if (industry) filter.industry = new RegExp(industry, 'i');
+  if (location) filter.location = new RegExp(location, 'i');
+  if (search) {
+    filter.$or = [{ companyName: new RegExp(search, 'i') }, { tagline: new RegExp(search, 'i') }];
+  }
+
+  const [brands, total] = await Promise.all([
+    BrandProfile.find(filter)
+      .populate('user', 'name avatarUrl')
+      .sort({ followerCount: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit)),
+    BrandProfile.countDocuments(filter),
+  ]);
+
+  return new ApiResponse(200, { brands, total, page: Number(page), limit: Number(limit) }, 'Brands fetched').send(res);
+});
+
 const uploadLogo = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.BRAND) throw ApiError.forbidden('Only brands can upload a logo');
   if (!req.file) throw ApiError.badRequest('No file uploaded');
@@ -142,4 +165,4 @@ const followBrand = catchAsync(async (req, res) => {
   return new ApiResponse(200, { following: !alreadyFollowing }, alreadyFollowing ? 'Unfollowed' : 'Followed').send(res);
 });
 
-module.exports = { getBrandById, getBrandBySlug, getMyProfile, updateMyProfile, getMyDashboard, uploadLogo, followBrand };
+module.exports = { listBrands, getBrandById, getBrandBySlug, getMyProfile, updateMyProfile, getMyDashboard, uploadLogo, followBrand };
