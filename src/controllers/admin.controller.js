@@ -9,6 +9,9 @@ const {
   Review,
   Category,
   ReferralConfig,
+  Withdrawal,
+  SiteSettings,
+  Notification,
 } = require('../models');
 const escrowService = require('../services/escrow.service');
 const generateSlug = require('../utils/slugify');
@@ -31,12 +34,39 @@ const listUsers = catchAsync(async (req, res) => {
   return new ApiResponse(200, { users, total, page: Number(page), pages: Math.ceil(total / limit) }, 'Users fetched').send(res);
 });
 
+/** GET /api/admin/users/:id — everything about one user in one call: their
+ * account, role-specific profile (Creator/Brand/Agency), recent wallet
+ * transactions, and reviews they've received. Built for a detail view so
+ * Admin doesn't have to jump between separate lists to understand one user. */
+const getUserDetail = catchAsync(async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) throw ApiError.notFound('User not found');
+
+  let roleProfile = null;
+  if (user.role === ROLES.CREATOR) roleProfile = await CreatorProfile.findOne({ user: user._id }).populate('category', 'label');
+  else if (user.role === ROLES.BRAND) roleProfile = await BrandProfile.findOne({ user: user._id });
+  else if (user.role === ROLES.AGENCY) roleProfile = await AgencyProfile.findOne({ user: user._id });
+
+  const [transactions, reviews, referredCount] = await Promise.all([
+    Transaction.find({ $or: [{ from: user._id }, { to: user._id }] }).sort({ createdAt: -1 }).limit(20),
+    Review.find({ toUser: user._id, isHidden: false }).sort({ createdAt: -1 }).limit(10).populate('fromUser', 'name'),
+    User.countDocuments({ referredBy: user._id }),
+  ]);
+
+  return new ApiResponse(
+    200,
+    { user, roleProfile, transactions, reviews, referredCount },
+    'User detail fetched'
+  ).send(res);
+});
+
 const suspendUser = catchAsync(async (req, res) => {
   const { reason } = req.body;
   const user = await User.findByIdAndUpdate(req.params.id, { isSuspended: true, suspensionReason: reason || '' }, { new: true });
   if (!user) throw ApiError.notFound('User not found');
   return new ApiResponse(200, user, 'User suspended').send(res);
 });
+
 
 const reinstateUser = catchAsync(async (req, res) => {
   const user = await User.findByIdAndUpdate(req.params.id, { isSuspended: false, suspensionReason: '' }, { new: true });
@@ -182,6 +212,17 @@ const listAllCampaigns = catchAsync(async (req, res) => {
   return new ApiResponse(200, campaigns, 'Campaigns fetched').send(res);
 });
 
+const listAllReviews = catchAsync(async (req, res) => {
+  const { flaggedOnly } = req.query;
+  const filter = flaggedOnly === 'true' ? { isFlagged: true, isHidden: false } : { isHidden: false };
+  const reviews = await Review.find(filter)
+    .populate('fromUser', 'name email')
+    .populate('toUser', 'name email')
+    .sort({ createdAt: -1 })
+    .limit(100);
+  return new ApiResponse(200, reviews, 'Reviews fetched').send(res);
+});
+
 const hideReview = catchAsync(async (req, res) => {
   const review = await Review.findByIdAndUpdate(req.params.id, { isHidden: true }, { new: true });
   if (!review) throw ApiError.notFound('Review not found');
@@ -277,6 +318,11 @@ const getAnalyticsOverview = catchAsync(async (req, res) => {
 
 // ---------- Categories ----------
 
+const listCategoriesAdmin = catchAsync(async (req, res) => {
+  const categories = await Category.find().sort({ label: 1 });
+  return new ApiResponse(200, categories, 'Categories fetched').send(res);
+});
+
 const createCategory = catchAsync(async (req, res) => {
   const { label, icon } = req.body;
   const slugify = require('../utils/slugify');
@@ -315,8 +361,115 @@ const updateReferralConfig = catchAsync(async (req, res) => {
   return new ApiResponse(200, config, 'Referral config updated').send(res);
 });
 
+// ---------- Withdrawal requests ----------
+
+const listWithdrawals = catchAsync(async (req, res) => {
+  const { status } = req.query;
+  const filter = status ? { status } : {};
+  const withdrawals = await Withdrawal.find(filter).populate('user', 'name email role').sort({ createdAt: -1 });
+  return new ApiResponse(200, withdrawals, 'Withdrawals fetched').send(res);
+});
+
+/** Marks a pending withdrawal as paid — money was already deducted from the
+ * wallet when the user requested it, so this is just a status change once
+ * Admin has actually sent the payout via UPI/bank transfer outside the app. */
+const markWithdrawalPaid = catchAsync(async (req, res) => {
+  const withdrawal = await Withdrawal.findById(req.params.id);
+  if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
+  if (withdrawal.status !== 'pending') throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
+
+  withdrawal.status = 'paid';
+  withdrawal.processedBy = req.user._id;
+  withdrawal.processedAt = new Date();
+  await withdrawal.save();
+
+  return new ApiResponse(200, withdrawal, 'Withdrawal marked as paid').send(res);
+});
+
+/** Rejects a pending withdrawal and refunds the held amount back to the
+ * user's wallet — the money was deducted on request, so this reverses it. */
+const rejectWithdrawal = catchAsync(async (req, res) => {
+  const { reason } = req.body;
+  const withdrawal = await Withdrawal.findById(req.params.id);
+  if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
+  if (withdrawal.status !== 'pending') throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
+
+  withdrawal.status = 'rejected';
+  withdrawal.adminNote = reason || '';
+  withdrawal.processedBy = req.user._id;
+  withdrawal.processedAt = new Date();
+  await withdrawal.save();
+
+  await User.findByIdAndUpdate(withdrawal.user, { $inc: { walletBalance: withdrawal.amount } });
+
+  return new ApiResponse(200, withdrawal, 'Withdrawal rejected and refunded to wallet').send(res);
+});
+
+// ---------- Site settings ----------
+
+const getSiteSettings = catchAsync(async (req, res) => {
+  const settings = await SiteSettings.getSingleton();
+  return new ApiResponse(200, settings, 'Site settings fetched').send(res);
+});
+
+const updateSiteSettings = catchAsync(async (req, res) => {
+  const { platformCommissionPercent, supportEmail, maintenanceMode, maintenanceMessage, homepageBannerText } = req.body;
+  const settings = await SiteSettings.getSingleton();
+
+  if (platformCommissionPercent !== undefined) settings.platformCommissionPercent = platformCommissionPercent;
+  if (supportEmail !== undefined) settings.supportEmail = supportEmail;
+  if (maintenanceMode !== undefined) settings.maintenanceMode = maintenanceMode;
+  if (maintenanceMessage !== undefined) settings.maintenanceMessage = maintenanceMessage;
+  if (homepageBannerText !== undefined) settings.homepageBannerText = homepageBannerText;
+
+  await settings.save();
+  return new ApiResponse(200, settings, 'Site settings updated').send(res);
+});
+
+// ---------- Broadcast notifications ----------
+
+/** Sends the same notification to many users at once — either everyone, or
+ * everyone with a given role. Inserts one Notification doc per recipient so
+ * each person's unread count / notification list works exactly like any
+ * other notification (no special-casing needed on the read side). */
+const broadcastNotification = catchAsync(async (req, res) => {
+  const { title, message, role } = req.body;
+  if (!title || !message) throw ApiError.badRequest('title and message are required');
+
+  const filter = role ? { role } : {};
+  const users = await User.find(filter).select('_id');
+  if (users.length === 0) return new ApiResponse(200, { sentTo: 0 }, 'No matching users found').send(res);
+
+  const docs = users.map((u) => ({ user: u._id, type: 'general', title, message }));
+  await Notification.insertMany(docs);
+
+  return new ApiResponse(200, { sentTo: users.length }, `Notification sent to ${users.length} user(s)`).send(res);
+});
+
+// ---------- Admin accounts ----------
+
+const listAdmins = catchAsync(async (req, res) => {
+  const admins = await User.find({ role: ROLES.ADMIN }).select('-password').sort({ createdAt: -1 });
+  return new ApiResponse(200, admins, 'Admins fetched').send(res);
+});
+
+/** POST /api/admin/admins — an existing Admin creates another one directly.
+ * Same "provision, then share credentials" pattern as Agency accounts. */
+const createAdmin = catchAsync(async (req, res) => {
+  const { name, email, password } = req.body;
+  if (!name || !email || !password) throw ApiError.badRequest('name, email and password are required');
+  if (password.length < 8) throw ApiError.badRequest('Password must be at least 8 characters');
+
+  const existing = await User.findOne({ email });
+  if (existing) throw ApiError.conflict('An account with this email already exists');
+
+  const admin = await User.create({ name, email, password, role: ROLES.ADMIN, roles: [ROLES.ADMIN], isEmailVerified: true });
+  return new ApiResponse(201, admin.toSafeObject(), 'Admin account created').send(res);
+});
+
 module.exports = {
   listUsers,
+  getUserDetail,
   suspendUser,
   reinstateUser,
   listPendingVerifications,
@@ -328,16 +481,26 @@ module.exports = {
   verifyAgency,
   getReferralConfig,
   updateReferralConfig,
+  listWithdrawals,
+  markWithdrawalPaid,
+  rejectWithdrawal,
+  getSiteSettings,
+  updateSiteSettings,
+  broadcastNotification,
   listAllSessions,
   removeSession,
   listAllCampaigns,
+  listAllReviews,
   hideReview,
   listAllTransactions,
   listDisputedEscrows,
   adminReleaseEscrow,
   adminRefundEscrow,
   getAnalyticsOverview,
+  listCategoriesAdmin,
   createCategory,
   updateCategory,
   deleteCategory,
+  listAdmins,
+  createAdmin,
 };

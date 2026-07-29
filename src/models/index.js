@@ -19,4 +19,6 @@ module.exports = {
   Gift: require('./Gift.model'),
   Post: require('./Post.model'),
   ReferralConfig: require('./ReferralConfig.model'),
+  Withdrawal: require('./Withdrawal.model'),
+  SiteSettings: require('./SiteSettings.model'),
 };

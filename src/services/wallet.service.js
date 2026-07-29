@@ -1,4 +1,4 @@
-const { User, CreatorProfile, AgencyProfile } = require('../models');
+const { User, CreatorProfile, AgencyProfile, SiteSettings } = require('../models');
 const env = require('../config/env');
 const { creditReferralCommission } = require('./referral.service');
 
@@ -12,7 +12,13 @@ const { creditReferralCommission } = require('./referral.service');
  * transaction can point back to the session/campaign that generated it.
  */
 async function splitEarnings(grossAmount, creatorProfileId, relatedModel = null, relatedId = null) {
-  const platformCommission = Math.round((grossAmount * env.platform.commissionPercent) / 100);
+  // DB-backed so an Admin can change this from the Admin Panel without a
+  // redeploy; falls back to the env var only if the settings doc is somehow
+  // missing (shouldn't happen — getSingleton creates it on first read).
+  const settings = await SiteSettings.getSingleton().catch(() => null);
+  const commissionPercent = settings ? settings.platformCommissionPercent : env.platform.commissionPercent;
+
+  const platformCommission = Math.round((grossAmount * commissionPercent) / 100);
   let remaining = grossAmount - platformCommission;
 
   let agencyCommission = 0;
