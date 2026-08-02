@@ -11,6 +11,7 @@ const {
   resetPassword,
   googleAuth,
   upgradeRole,
+  completeOnboarding,
 } = require('../controllers/auth.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
@@ -26,5 +27,6 @@ router.get('/me', protect, getMe);
 router.post('/forgot-password', authLimiter, validate(forgotPasswordSchema), forgotPassword);
 router.post('/reset-password', authLimiter, validate(resetPasswordSchema), resetPassword);
 router.post('/upgrade-role', protect, upgradeRole);
+router.post('/complete-onboarding', protect, completeOnboarding);
 
 module.exports = router;

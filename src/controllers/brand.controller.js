@@ -3,9 +3,8 @@ const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const generateSlug = require('../utils/slugify');
-const { ROLES, TRANSACTION_TYPE } = require('../constants/enums');
+const { ROLES, TRANSACTION_TYPE, VERIFICATION_STATUS } = require('../constants/enums');
 
-/** GET /api/brands — public discovery listing, same pattern as listCreators. */
 const listBrands = catchAsync(async (req, res) => {
   const { industry, location, search, page = 1, limit = 20 } = req.query;
 
@@ -46,7 +45,6 @@ const getBrandById = catchAsync(async (req, res) => {
   return new ApiResponse(200, brand, 'Brand fetched').send(res);
 });
 
-// Public profile page — matches the pattern used for creator profiles (/creators/:slug)
 const getBrandBySlug = catchAsync(async (req, res) => {
   const brand = await BrandProfile.findOneAndUpdate(
     { slug: req.params.slug },
@@ -56,7 +54,6 @@ const getBrandBySlug = catchAsync(async (req, res) => {
 
   if (!brand) throw ApiError.notFound('Brand not found');
 
-  // Real, computed counts — not hardcoded.
   const campaignsPosted = await Campaign.countDocuments({ brand: brand._id });
   const campaigns = await Campaign.find({ brand: brand._id, status: 'open' }).sort({ createdAt: -1 }).limit(6);
 
@@ -69,7 +66,6 @@ const getMyProfile = catchAsync(async (req, res) => {
   let brand = await BrandProfile.findOne({ user: req.user._id }).populate('user', 'name avatarUrl email phone');
   if (!brand) throw ApiError.notFound('Brand profile not found');
 
-  // Backfill a slug for brand accounts created before public profile pages existed.
   if (!brand.slug) {
     brand.slug = generateSlug(brand.companyName);
     await brand.save();
@@ -94,30 +90,30 @@ const updateMyProfile = catchAsync(async (req, res) => {
     socials,
     targetAudience,
     contactDesignation,
+    submitForApproval,
   } = req.body;
 
-  const brand = await BrandProfile.findOneAndUpdate(
-    { user: req.user._id },
-    {
-      $set: {
-        ...(companyName && { companyName }),
-        ...(tagline !== undefined && { tagline }),
-        ...(website !== undefined && { website }),
-        ...(industry !== undefined && { industry }),
-        ...(about !== undefined && { about }),
-        ...(location !== undefined && { location }),
-        ...(foundedYear !== undefined && { foundedYear }),
-        ...(companySize !== undefined && { companySize }),
-        ...(whatWeOffer && { whatWeOffer }),
-        ...(socials && { socials }),
-        ...(targetAudience !== undefined && { targetAudience }),
-        ...(contactDesignation !== undefined && { contactDesignation }),
-      },
-    },
-    { new: true, runValidators: true }
-  );
-
+  const brand = await BrandProfile.findOne({ user: req.user._id });
   if (!brand) throw ApiError.notFound('Brand profile not found');
+
+  if (companyName) brand.companyName = companyName;
+  if (tagline !== undefined) brand.tagline = tagline;
+  if (website !== undefined) brand.website = website;
+  if (industry !== undefined) brand.industry = industry;
+  if (about !== undefined) brand.about = about;
+  if (location !== undefined) brand.location = location;
+  if (foundedYear !== undefined) brand.foundedYear = foundedYear;
+  if (companySize !== undefined) brand.companySize = companySize;
+  if (whatWeOffer) brand.whatWeOffer = whatWeOffer;
+  if (socials) brand.socials = socials;
+  if (targetAudience !== undefined) brand.targetAudience = targetAudience;
+  if (contactDesignation !== undefined) brand.contactDesignation = contactDesignation;
+
+  if (submitForApproval && brand.verificationStatus === VERIFICATION_STATUS.UNVERIFIED) {
+    brand.verificationStatus = VERIFICATION_STATUS.PENDING;
+  }
+
+  await brand.save();
   return new ApiResponse(200, brand, 'Profile updated').send(res);
 });
 

@@ -22,6 +22,25 @@ function issueTokens(res, user) {
   return accessToken;
 }
 
+/** Creator/Brand/Agency need admin approval before they get full dashboard
+ * access; Fan/Admin don't have a profile with a verificationStatus, so this
+ * returns null for them — meaning "no approval gate applies". */
+async function getProfileStatus(user) {
+  if (user.role === ROLES.CREATOR) {
+    const p = await CreatorProfile.findOne({ user: user._id }).select('verificationStatus');
+    return p?.verificationStatus || null;
+  }
+  if (user.role === ROLES.BRAND) {
+    const p = await BrandProfile.findOne({ user: user._id }).select('verificationStatus');
+    return p?.verificationStatus || null;
+  }
+  if (user.role === ROLES.AGENCY) {
+    const p = await AgencyProfile.findOne({ user: user._id }).select('verificationStatus');
+    return p?.verificationStatus || null;
+  }
+  return null;
+}
+
 const register = catchAsync(async (req, res) => {
   const { name, email, password, phone, role, referralCode } = req.body;
 
@@ -32,7 +51,6 @@ const register = catchAsync(async (req, res) => {
 
   const user = await User.create({ name, email, password, phone, role, roles: [role], referredBy: referrer?._id || null });
 
-  // create the role-specific profile alongside the base user
   if (role === ROLES.CREATOR) {
     await CreatorProfile.create({ user: user._id, slug: generateSlug(name) });
   } else if (role === ROLES.BRAND) {
@@ -42,7 +60,8 @@ const register = catchAsync(async (req, res) => {
   }
 
   const accessToken = issueTokens(res, user);
-  return new ApiResponse(201, { user: user.toSafeObject(), accessToken }, 'Account created successfully').send(res);
+  const profileStatus = await getProfileStatus(user);
+  return new ApiResponse(201, { user: user.toSafeObject(), accessToken, profileStatus }, 'Account created successfully').send(res);
 });
 
 const login = catchAsync(async (req, res) => {
@@ -58,7 +77,8 @@ const login = catchAsync(async (req, res) => {
   await user.save();
 
   const accessToken = issueTokens(res, user);
-  return new ApiResponse(200, { user: user.toSafeObject(), accessToken }, 'Logged in successfully').send(res);
+  const profileStatus = await getProfileStatus(user);
+  return new ApiResponse(200, { user: user.toSafeObject(), accessToken, profileStatus }, 'Logged in successfully').send(res);
 });
 
 const refresh = catchAsync(async (req, res) => {
@@ -85,18 +105,16 @@ const logout = catchAsync(async (req, res) => {
 });
 
 const getMe = catchAsync(async (req, res) => {
-  return new ApiResponse(200, req.user.toSafeObject(), 'Current user fetched').send(res);
+  const profileStatus = await getProfileStatus(req.user);
+  return new ApiResponse(200, { ...req.user.toSafeObject(), profileStatus }, 'Current user fetched').send(res);
 });
 
 const forgotPassword = catchAsync(async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email });
 
-  // Always respond the same way whether or not the email exists, to avoid leaking which emails are registered
   if (user) {
     const resetToken = crypto.randomBytes(32).toString('hex');
-    // NOTE: store hashed resetToken + expiry on the user document, and email
-    // the raw token via an email service — wiring point for e.g. Resend/SES.
     user.passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
     user.passwordResetExpires = Date.now() + 15 * 60 * 1000;
     await user.save({ validateBeforeSave: false });
@@ -123,7 +141,6 @@ const resetPassword = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Password reset successfully').send(res);
 });
 
-/** Lets an existing Fan account add a Creator/Brand/Agency role without a new signup. */
 const upgradeRole = catchAsync(async (req, res) => {
   const { role, name } = req.body;
   if (![ROLES.CREATOR, ROLES.BRAND, ROLES.AGENCY].includes(role)) {
@@ -132,7 +149,7 @@ const upgradeRole = catchAsync(async (req, res) => {
 
   const user = req.user;
   if (!user.roles.includes(role)) user.roles.push(role);
-  user.role = role; // active role switches to the new one
+  user.role = role;
   await user.save();
 
   if (role === ROLES.CREATOR && !(await CreatorProfile.findOne({ user: user._id }))) {
@@ -143,7 +160,19 @@ const upgradeRole = catchAsync(async (req, res) => {
     await AgencyProfile.create({ user: user._id, agencyName: name || user.name, referralCode: generateSlug(name || user.name).toUpperCase() });
   }
 
-  return new ApiResponse(200, user.toSafeObject(), `Account upgraded to ${role}`).send(res);
+  const profileStatus = await getProfileStatus(user);
+  return new ApiResponse(200, { ...user.toSafeObject(), profileStatus }, `Account upgraded to ${role}`).send(res);
+});
+
+/** POST /api/auth/complete-onboarding — marks the signup wizard as finished.
+ * Called once at the very end of Signup.tsx's handleFinish, for every role
+ * including Fan. Without this, closing the browser mid-wizard leaves a bare
+ * Fan account that the next login would treat as "done" incorrectly. */
+const completeOnboarding = catchAsync(async (req, res) => {
+  req.user.onboardingCompleted = true;
+  await req.user.save();
+  const profileStatus = await getProfileStatus(req.user);
+  return new ApiResponse(200, { ...req.user.toSafeObject(), profileStatus }, 'Onboarding completed').send(res);
 });
 
 const googleAuth = catchAsync(async (req, res) => {
@@ -168,8 +197,6 @@ const googleAuth = catchAsync(async (req, res) => {
   const isNewUser = !user;
 
   if (user) {
-    // Returning user — log them straight in, whatever role/provider they registered with.
-    // The role picker on the sign-up screen only matters for brand-new accounts.
     if (user.isSuspended) throw ApiError.forbidden('Your account has been suspended. Contact support.');
     if (!user.googleId) {
       user.googleId = uid;
@@ -178,8 +205,6 @@ const googleAuth = catchAsync(async (req, res) => {
     user.lastLoginAt = new Date();
     await user.save();
   } else {
-    // New user — role comes from whichever tab (Fan/Creator/Brand/Agency) was
-    // selected on the sign-up screen; falls back to Fan if none was sent.
     const role = Object.values(ROLES).includes(requestedRole) ? requestedRole : ROLES.FAN;
     const randomPassword = crypto.randomBytes(24).toString('hex');
     const finalName = name || email.split('@')[0];
@@ -197,7 +222,6 @@ const googleAuth = catchAsync(async (req, res) => {
       referredBy: referrer?._id || null,
     });
 
-    // Same role-specific profile creation as the normal email/password register flow.
     if (role === ROLES.CREATOR) {
       await CreatorProfile.create({ user: user._id, slug: generateSlug(finalName) });
     } else if (role === ROLES.BRAND) {
@@ -208,8 +232,9 @@ const googleAuth = catchAsync(async (req, res) => {
   }
 
   const accessToken = issueTokens(res, user);
+  const profileStatus = await getProfileStatus(user);
   console.log('[google-auth backend] SUCCESS — issuing tokens for user:', user.email, ', role:', user.role);
-  return new ApiResponse(200, { user: user.toSafeObject(), accessToken, isNewUser }, 'Signed in with Google').send(res);
+  return new ApiResponse(200, { user: user.toSafeObject(), accessToken, isNewUser, profileStatus }, 'Signed in with Google').send(res);
 });
 
-module.exports = { register, login, refresh, logout, getMe, forgotPassword, resetPassword, googleAuth, upgradeRole };
+module.exports = { register, login, refresh, logout, getMe, forgotPassword, resetPassword, googleAuth, upgradeRole, completeOnboarding };

@@ -20,23 +20,26 @@ const userSchema = new mongoose.Schema(
     authProvider: { type: String, enum: ['local', 'google'], default: 'local' },
     googleId: { type: String, default: null, index: true, sparse: true },
 
-    // Referral system — applies to all 4 roles (Fan/Creator/Brand/Agency).
-    // Every user gets their own shareable code; referredBy records whose
-    // code they entered at signup (if any), so commission can be traced
-    // back through User.role -> User.role pairs against ReferralConfig.
     referralCode: { type: String, unique: true, sparse: true, index: true },
     referredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
 
     role: { type: String, enum: Object.values(ROLES), default: ROLES.FAN },
-    // A user can hold multiple roles over time (Fan -> also Creator, etc.)
     roles: { type: [String], enum: Object.values(ROLES), default: [ROLES.FAN] },
+
+    // True only once the person has actually finished the signup wizard
+    // (picked a real role and clicked Finish, or explicitly chose to stay
+    // Fan). A brand-new Google account starts false — if they close the
+    // browser mid-wizard, the account exists as a bare Fan but is NOT
+    // considered onboarded, so their next login sends them back into the
+    // wizard instead of straight to the Fan home screen.
+    onboardingCompleted: { type: Boolean, default: false },
 
     isEmailVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
     isSuspended: { type: Boolean, default: false },
     suspensionReason: { type: String, default: '' },
 
-    walletBalance: { type: Number, default: 0 }, // in paise, avoids float rounding issues
+    walletBalance: { type: Number, default: 0 },
 
     passwordResetToken: { type: String, select: false },
     passwordResetExpires: { type: Date, select: false },
@@ -63,7 +66,6 @@ userSchema.pre('save', async function assignReferralCode(next) {
     .replace(/[^a-z0-9]/g, '')
     .slice(0, 8) || 'user';
   let attempt = `${base}${Math.floor(1000 + Math.random() * 9000)}`;
-  // Extremely unlikely to collide, but guard against it anyway.
   while (await this.constructor.exists({ referralCode: attempt })) {
     attempt = `${base}${Math.floor(1000 + Math.random() * 9000)}`;
   }

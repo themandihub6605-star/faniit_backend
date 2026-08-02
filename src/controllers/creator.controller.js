@@ -3,7 +3,7 @@ const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/enums');
-
+const { VERIFICATION_STATUS } = require('../constants/enums');
 const listCreators = catchAsync(async (req, res) => {
   const { category, location, minFollowers, search, page = 1, limit = 20 } = req.query;
 
@@ -75,32 +75,32 @@ const getMyProfile = catchAsync(async (req, res) => {
   return new ApiResponse(200, creator, 'Profile fetched').send(res);
 });
 
+
 const updateMyProfile = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can update a creator profile');
 
-  const { bio, title, category, skills, location, socials, isAvailableForWork, responseTime, languages, yearsOfExperience, portfolioLink } = req.body;
+  const { bio, title, category, skills, location, socials, isAvailableForWork, responseTime, languages, yearsOfExperience, portfolioLink, submitForApproval } = req.body;
 
-  const creator = await CreatorProfile.findOneAndUpdate(
-    { user: req.user._id },
-    {
-      $set: {
-        ...(bio !== undefined && { bio }),
-        ...(title !== undefined && { title }),
-        ...(category && { category }),
-        ...(skills && { skills }),
-        ...(location && { location }),
-        ...(socials && { socials }),
-        ...(isAvailableForWork !== undefined && { isAvailableForWork }),
-        ...(responseTime !== undefined && { responseTime }),
-        ...(languages && { languages }),
-        ...(yearsOfExperience !== undefined && { yearsOfExperience }),
-        ...(portfolioLink !== undefined && { portfolioLink }),
-      },
-    },
-    { new: true, runValidators: true }
-  );
-
+  const creator = await CreatorProfile.findOne({ user: req.user._id });
   if (!creator) throw ApiError.notFound('Creator profile not found');
+
+  if (bio !== undefined) creator.bio = bio;
+  if (title !== undefined) creator.title = title;
+  if (category) creator.category = category;
+  if (skills) creator.skills = skills;
+  if (location) creator.location = location;
+  if (socials) creator.socials = socials;
+  if (isAvailableForWork !== undefined) creator.isAvailableForWork = isAvailableForWork;
+  if (responseTime !== undefined) creator.responseTime = responseTime;
+  if (languages) creator.languages = languages;
+  if (yearsOfExperience !== undefined) creator.yearsOfExperience = yearsOfExperience;
+  if (portfolioLink !== undefined) creator.portfolioLink = portfolioLink;
+
+  if (submitForApproval && creator.verificationStatus === VERIFICATION_STATUS.UNVERIFIED) {
+    creator.verificationStatus = VERIFICATION_STATUS.PENDING;
+  }
+
+  await creator.save();
   return new ApiResponse(200, creator, 'Profile updated').send(res);
 });
 
