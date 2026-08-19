@@ -20,6 +20,7 @@ const BOOKING_STATUS = Object.freeze({
 });
 
 const CAMPAIGN_STATUS = Object.freeze({
+  DRAFT: 'draft',
   OPEN: 'open',
   IN_PROGRESS: 'in_progress',
   SUBMITTED: 'submitted',
@@ -40,6 +41,7 @@ const TRANSACTION_TYPE = Object.freeze({
   DONATION: 'donation',
   CAMPAIGN_ESCROW_DEPOSIT: 'campaign_escrow_deposit',
   CAMPAIGN_PAYOUT: 'campaign_payout',
+  CAMPAIGN_POSTING_FEE: 'campaign_posting_fee',
   AGENCY_COMMISSION: 'agency_commission',
   REFERRAL_COMMISSION: 'referral_commission',
   PLATFORM_COMMISSION: 'platform_commission',
@@ -62,6 +64,24 @@ const VERIFICATION_STATUS = Object.freeze({
   REJECTED: 'rejected',
 });
 
+// --- Campaign creation wizard ---
+const LOCATION_TYPE = Object.freeze({
+  PAN_INDIA: 'pan_india',
+  STATE: 'state',
+  CITY: 'city',
+});
+
+const CAMPAIGN_TYPE = Object.freeze({
+  PAID: 'paid',
+  BARTER: 'barter',
+});
+
+const GENDER_TARGET = Object.freeze({
+  MALE: 'male',
+  FEMALE: 'female',
+  OTHER: 'other',
+});
+
 module.exports = {
   ROLES,
   SESSION_TYPES,
@@ -71,4 +91,7 @@ module.exports = {
   TRANSACTION_TYPE,
   TRANSACTION_STATUS,
   VERIFICATION_STATUS,
+  LOCATION_TYPE,
+  CAMPAIGN_TYPE,
+  GENDER_TARGET,
 };

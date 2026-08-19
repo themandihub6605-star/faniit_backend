@@ -4,7 +4,14 @@ const router = express.Router();
 const {
   listCampaigns,
   getCampaignById,
-  createCampaign,
+  getMyDraftCampaign,
+  createDraftCampaign,
+  updateDraftCampaign,
+  addProduct,
+  removeProduct,
+  uploadCampaignMedia,
+  getFeePreview,
+  publishCampaign,
   applyToCampaign,
   getMyProposals,
   getApplications,
@@ -19,15 +26,49 @@ const {
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
 const validate = require('../middlewares/validate.middleware');
-const { createCampaignSchema, applyCampaignSchema } = require('../validators/campaign.validator');
+const { uploadImage, uploadMedia } = require('../middlewares/upload.middleware');
+const {
+  createDraftCampaignSchema,
+  updateDraftCampaignSchema,
+  addProductSchema,
+  publishCampaignSchema,
+  applyCampaignSchema,
+} = require('../validators/campaign.validator');
 const { ROLES } = require('../constants/enums');
 
 // specific static paths BEFORE the /:id catch-all
 router.get('/proposals/me', protect, authorize(ROLES.CREATOR), getMyProposals);
 router.get('/saved/me', protect, getSavedCampaigns);
+router.get('/fee-preview', protect, authorize(ROLES.BRAND), getFeePreview);
 
 router.get('/', listCampaigns);
-router.post('/', protect, authorize(ROLES.BRAND), validate(createCampaignSchema), createCampaign);
+router.post('/draft', protect, authorize(ROLES.BRAND), validate(createDraftCampaignSchema), createDraftCampaign);
+
+router.get('/:id/draft', protect, authorize(ROLES.BRAND), getMyDraftCampaign);
+router.patch('/:id', protect, authorize(ROLES.BRAND), validate(updateDraftCampaignSchema), updateDraftCampaign);
+
+router.post(
+  '/:id/products',
+  protect,
+  authorize(ROLES.BRAND),
+  uploadImage('fanitt/campaign-products').single('image'),
+  validate(addProductSchema),
+  addProduct
+);
+router.delete('/:id/products/:productId', protect, authorize(ROLES.BRAND), removeProduct);
+
+router.post(
+  '/:id/media',
+  protect,
+  authorize(ROLES.BRAND),
+  uploadMedia('fanitt/campaign-media').fields([
+    { name: 'campaignImage', maxCount: 1 },
+    { name: 'media', maxCount: 10 },
+  ]),
+  uploadCampaignMedia
+);
+
+router.post('/:id/publish', protect, authorize(ROLES.BRAND), validate(publishCampaignSchema), publishCampaign);
 
 router.post('/:id/apply', protect, authorize(ROLES.CREATOR), validate(applyCampaignSchema), applyToCampaign);
 router.post('/:id/save', protect, toggleSaveCampaign);

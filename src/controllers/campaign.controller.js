@@ -1,11 +1,20 @@
-const { Campaign, Application, BrandProfile, CreatorProfile, User } = require('../models');
+const { Campaign, Application, BrandProfile, CreatorProfile, User, Transaction, SiteSettings } = require('../models');
 const paymentService = require('../services/payment.service');
 const escrowService = require('../services/escrow.service');
 const notificationService = require('../services/notification.service');
+const { debitUser } = require('../services/wallet.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { ROLES, CAMPAIGN_STATUS, APPLICATION_STATUS } = require('../constants/enums');
+const {
+  ROLES,
+  CAMPAIGN_STATUS,
+  APPLICATION_STATUS,
+  CAMPAIGN_TYPE,
+  LOCATION_TYPE,
+  TRANSACTION_TYPE,
+  TRANSACTION_STATUS,
+} = require('../constants/enums');
 
 const listCampaigns = catchAsync(async (req, res) => {
   const { category, status = CAMPAIGN_STATUS.OPEN, page = 1, limit = 20 } = req.query;
@@ -33,21 +42,224 @@ const getCampaignById = catchAsync(async (req, res) => {
     .populate({ path: 'assignedCreator', populate: { path: 'user', select: 'name avatarUrl' } });
 
   if (!campaign) throw ApiError.notFound('Campaign not found');
+  // Drafts are never visible on the public detail route — brands use
+  // GET /:id/draft (below) to load their own draft for editing/preview.
+  if (campaign.status === CAMPAIGN_STATUS.DRAFT) throw ApiError.notFound('Campaign not found');
+
   return new ApiResponse(200, campaign, 'Campaign fetched').send(res);
 });
 
-const createCampaign = catchAsync(async (req, res) => {
-  if (req.user.role !== ROLES.BRAND) throw ApiError.forbidden('Only brands can post a requirement');
+const getMyDraftCampaign = catchAsync(async (req, res) => {
+  const campaign = await Campaign.findById(req.params.id).populate('brand').populate('category', 'label icon');
+  if (!campaign) throw ApiError.notFound('Campaign not found');
+  if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
 
+  return new ApiResponse(200, campaign, 'Draft fetched').send(res);
+});
+
+// --- Step 1: create the draft ---
+const createDraftCampaign = catchAsync(async (req, res) => {
   const brand = await BrandProfile.findOne({ user: req.user._id });
   if (!brand) throw ApiError.notFound('Brand profile not found');
 
-  const campaign = await Campaign.create({ ...req.body, brand: brand._id });
+  const { title, campaignType, locationType, locationValue } = req.body;
 
-  brand.totalCampaigns += 1;
-  await brand.save();
+  const campaign = await Campaign.create({
+    brand: brand._id,
+    title,
+    campaignType,
+    locationType,
+    locationValue,
+    location: locationType === LOCATION_TYPE.PAN_INDIA ? 'Pan India' : locationValue || 'Remote',
+    status: CAMPAIGN_STATUS.DRAFT,
+  });
 
-  return new ApiResponse(201, campaign, 'Requirement posted').send(res);
+  return new ApiResponse(201, campaign, 'Draft created').send(res);
+});
+
+// --- Steps 2-3: budget, targeting, do's & don'ts ---
+const updateDraftCampaign = catchAsync(async (req, res) => {
+  const campaign = await Campaign.findById(req.params.id).populate('brand');
+  if (!campaign) throw ApiError.notFound('Campaign not found');
+  if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
+  if (campaign.status !== CAMPAIGN_STATUS.DRAFT) throw ApiError.conflict('Only draft campaigns can be edited this way');
+
+  const editableFields = [
+    'title',
+    'campaignType',
+    'locationType',
+    'locationValue',
+    'budget',
+    'description',
+    'category',
+    'creatorRequirement',
+    'durationLabel',
+    'influencerCategories',
+    'genderTarget',
+    'ageRange',
+    'minFollowers',
+    'maxInfluencers',
+    'dos',
+    'donts',
+    'deliverables',
+  ];
+  editableFields.forEach((field) => {
+    if (req.body[field] !== undefined) campaign[field] = req.body[field];
+  });
+
+  if (req.body.locationType !== undefined || req.body.locationValue !== undefined) {
+    campaign.location = campaign.locationType === LOCATION_TYPE.PAN_INDIA ? 'Pan India' : campaign.locationValue || 'Remote';
+  }
+
+  await campaign.save();
+  return new ApiResponse(200, campaign, 'Draft updated').send(res);
+});
+
+// --- Step 2: barter products ---
+const addProduct = catchAsync(async (req, res) => {
+  const campaign = await Campaign.findById(req.params.id).populate('brand');
+  if (!campaign) throw ApiError.notFound('Campaign not found');
+  if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
+
+  const { name, description, quantity, price } = req.body;
+
+  campaign.products.push({
+    name,
+    description,
+    quantity,
+    price,
+    imageUrl: req.file?.path || '',
+  });
+  await campaign.save();
+
+  return new ApiResponse(201, campaign.products[campaign.products.length - 1], 'Product added').send(res);
+});
+
+const removeProduct = catchAsync(async (req, res) => {
+  const campaign = await Campaign.findById(req.params.id).populate('brand');
+  if (!campaign) throw ApiError.notFound('Campaign not found');
+  if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
+
+  campaign.products.pull(req.params.productId);
+  await campaign.save();
+
+  return new ApiResponse(200, null, 'Product removed').send(res);
+});
+
+// --- Step 4: campaign image + sample media ---
+const uploadCampaignMedia = catchAsync(async (req, res) => {
+  const campaign = await Campaign.findById(req.params.id).populate('brand');
+  if (!campaign) throw ApiError.notFound('Campaign not found');
+  if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
+
+  if (req.files?.campaignImage?.[0]) {
+    campaign.campaignImageUrl = req.files.campaignImage[0].path;
+  }
+  if (req.files?.media?.length) {
+    campaign.sampleMedia.push(...req.files.media.map((f) => f.path));
+  }
+  await campaign.save();
+
+  return new ApiResponse(
+    200,
+    { campaignImageUrl: campaign.campaignImageUrl, sampleMedia: campaign.sampleMedia },
+    'Media uploaded'
+  ).send(res);
+});
+
+function assertPublishable(campaign) {
+  const missing = [];
+  if (!campaign.title || campaign.title.trim().length < 3) missing.push('Campaign name');
+  if (!campaign.description || campaign.description.trim().length < 10) missing.push('Description');
+  if (campaign.campaignType === CAMPAIGN_TYPE.PAID && (!campaign.budget || campaign.budget < 100)) {
+    missing.push('Budget');
+  }
+  if (campaign.campaignType === CAMPAIGN_TYPE.BARTER && campaign.products.length === 0) {
+    missing.push('At least one barter product');
+  }
+  if (missing.length) throw ApiError.badRequest(`Please complete before publishing: ${missing.join(', ')}`);
+}
+
+// --- Fee preview: lets the frontend show the publish-modal amounts before
+// the brand commits, without side effects ---
+const getFeePreview = catchAsync(async (req, res) => {
+  const settings = await SiteSettings.getSingleton();
+  const feeIsWaived = req.user.role === ROLES.ADMIN || settings.allowFreeCampaignPublish;
+
+  const baseFee = feeIsWaived ? 0 : settings.campaignPostingFee;
+  const tax = feeIsWaived ? 0 : Math.round((baseFee * settings.campaignPostingFeeTaxPercent) / 100);
+  const totalFee = baseFee + tax;
+
+  return new ApiResponse(
+    200,
+    { baseFee, tax, totalFee, waived: feeIsWaived, walletBalance: req.user.walletBalance },
+    'Fee preview fetched'
+  ).send(res);
+});
+
+// --- Final step: pay the posting fee (or waive it) and go live ---
+const publishCampaign = catchAsync(async (req, res) => {
+  const campaign = await Campaign.findById(req.params.id).populate('brand');
+  if (!campaign) throw ApiError.notFound('Campaign not found');
+  if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
+  if (campaign.status !== CAMPAIGN_STATUS.DRAFT) throw ApiError.conflict('This campaign has already been published');
+
+  assertPublishable(campaign);
+
+  const { useWalletMoney } = req.body;
+
+  const settings = await SiteSettings.getSingleton();
+  const user = await User.findById(req.user._id);
+
+  // Admins always publish free (internal/testing use). The global
+  // allowFreeCampaignPublish flag is a separate admin-configurable switch
+  // so QA/brands can test-publish without needing wallet balance while
+  // this flow is being validated — flip it off once fees go fully live.
+  const feeIsWaived = req.user.role === ROLES.ADMIN || settings.allowFreeCampaignPublish;
+
+  const baseFee = feeIsWaived ? 0 : settings.campaignPostingFee;
+  const tax = feeIsWaived ? 0 : Math.round((baseFee * settings.campaignPostingFeeTaxPercent) / 100);
+  const totalFee = baseFee + tax;
+
+  if (totalFee > 0) {
+    if (!useWalletMoney) {
+      throw ApiError.badRequest('Wallet payment is currently the only supported way to publish a campaign');
+    }
+    if (user.walletBalance < totalFee) {
+      throw ApiError.badRequest('Insufficient wallet balance. Please add money to your wallet and try again.');
+    }
+    await debitUser(req.user._id, totalFee);
+
+    try {
+      await Transaction.create({
+        from: req.user._id,
+        type: TRANSACTION_TYPE.CAMPAIGN_POSTING_FEE,
+        amount: totalFee,
+        status: TRANSACTION_STATUS.SUCCESS,
+        relatedModel: 'Campaign',
+        relatedId: campaign._id,
+      });
+    } catch (err) {
+      // Wallet is already debited at this point — don't fail the publish
+      // over a logging record. Surface it so it can be reconciled manually.
+      console.error('[publishCampaign] Failed to log fee transaction:', err.message);
+    }
+  }
+
+  campaign.status = CAMPAIGN_STATUS.OPEN;
+  campaign.isFeePaid = true;
+  campaign.feeAmount = totalFee;
+  campaign.publishedAt = new Date();
+  await campaign.save();
+
+  campaign.brand.totalCampaigns += 1;
+  await campaign.brand.save();
+
+  return new ApiResponse(
+    200,
+    { campaign, fee: { baseFee, tax, totalFee, waived: feeIsWaived } },
+    'Campaign published'
+  ).send(res);
 });
 
 const applyToCampaign = catchAsync(async (req, res) => {
@@ -258,7 +470,14 @@ const approveWork = catchAsync(async (req, res) => {
 module.exports = {
   listCampaigns,
   getCampaignById,
-  createCampaign,
+  getMyDraftCampaign,
+  createDraftCampaign,
+  updateDraftCampaign,
+  addProduct,
+  removeProduct,
+  uploadCampaignMedia,
+  getFeePreview,
+  publishCampaign,
   applyToCampaign,
   getMyProposals,
   getApplications,

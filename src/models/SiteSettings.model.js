@@ -12,6 +12,15 @@ const siteSettingsSchema = new mongoose.Schema(
     maintenanceMode: { type: Boolean, default: false },
     maintenanceMessage: { type: String, default: '' },
     homepageBannerText: { type: String, default: '' },
+
+    // Campaign publishing fee — charged from the brand's wallet when they
+    // publish a campaign (see campaign.controller.js publishCampaign).
+    campaignPostingFee: { type: Number, default: 50000, min: 0 }, // in paise (₹500)
+    campaignPostingFeeTaxPercent: { type: Number, default: 18, min: 0, max: 100 },
+    // Admin-facing test/QA switch — when true, EVERY brand can publish
+    // campaigns for free regardless of wallet balance. Meant to be flipped
+    // on temporarily while this flow is being tested, then off again.
+    allowFreeCampaignPublish: { type: Boolean, default: false },
   },
   { timestamps: true, _id: false }
 );
