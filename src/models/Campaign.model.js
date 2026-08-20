@@ -25,10 +25,13 @@ const campaignSchema = new mongoose.Schema(
 
     campaignType: { type: String, enum: Object.values(CAMPAIGN_TYPE), default: CAMPAIGN_TYPE.PAID },
 
-    // budget only applies to paid campaigns; barter campaigns use `products`
-    // instead. Not schema-required — enforced conditionally in publishCampaign.
-    budget: { type: Number, default: 0 }, // total campaign budget, in paise
-    products: { type: [campaignProductSchema], default: [] },
+    // For paid campaigns, budget is DERIVED (costPerInfluencer x
+    // maxInfluencers) — computed server-side in updateDraftCampaign,
+    // never trusted from the client directly. For barter campaigns budget
+    // stays 0 and `products` is what's actually offered.
+    costPerInfluencer: { type: Number, default: 0 }, // in paise
+    budget: { type: Number, default: 0 }, // total campaign budget, in paise — derived for paid campaigns
+    products: { type: [campaignProductSchema], default: [] }, // required for barter; optional bonus freebies on paid campaigns
 
     durationLabel: { type: String, default: '' }, // e.g. "2-week campaign"
 
@@ -48,7 +51,7 @@ const campaignSchema = new mongoose.Schema(
       max: { type: Number, default: 45 },
     },
     minFollowers: { type: Number, default: null },
-    maxInfluencers: { type: Number, default: 1 }, // informational only — single-creator accept flow is still what's wired up
+    maxInfluencers: { type: Number, default: 1 }, // "Number of Influencers Required" — informational for now; single-creator accept flow is still what's wired up end-to-end
 
     dos: { type: [String], default: [] },
     donts: { type: [String], default: [] },
@@ -64,9 +67,6 @@ const campaignSchema = new mongoose.Schema(
 
     status: { type: String, enum: Object.values(CAMPAIGN_STATUS), default: CAMPAIGN_STATUS.DRAFT },
 
-    // publish-time fee tracking
-    isFeePaid: { type: Boolean, default: false },
-    feeAmount: { type: Number, default: 0 }, // in paise, whatever was actually charged (0 if waived)
     publishedAt: { type: Date, default: null },
 
     assignedCreator: { type: mongoose.Schema.Types.ObjectId, ref: 'CreatorProfile', default: null },

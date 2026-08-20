@@ -13,7 +13,7 @@ const updateDraftCampaignSchema = z.object({
   campaignType: z.nativeEnum(CAMPAIGN_TYPE).optional(),
   locationType: z.nativeEnum(LOCATION_TYPE).optional(),
   locationValue: z.string().optional(),
-  budget: z.number().min(0).optional(),
+  costPerInfluencer: z.number().min(0).optional(),
   description: z.string().min(10, 'Description is too short').max(2000).optional(),
   category: z.string().optional(),
   creatorRequirement: z.string().optional(),
@@ -47,13 +47,6 @@ const addProductSchema = z.object({
   price: z.coerce.number().min(0, 'Price must be a positive number'),
 });
 
-const publishCampaignSchema = z.object({
-  useWalletMoney: z.boolean().default(true),
-  agreeToTerms: z.literal(true, {
-    errorMap: () => ({ message: 'You must agree to the Terms & Conditions to publish' }),
-  }),
-});
-
 const applyCampaignSchema = z.object({
   pitch: z.string().max(1000).optional(),
   quotedAmount: z.number().min(0).optional(),
@@ -64,6 +57,5 @@ module.exports = {
   createDraftCampaignSchema,
   updateDraftCampaignSchema,
   addProductSchema,
-  publishCampaignSchema,
   applyCampaignSchema,
 };

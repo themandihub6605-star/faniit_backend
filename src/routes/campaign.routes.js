@@ -10,7 +10,6 @@ const {
   addProduct,
   removeProduct,
   uploadCampaignMedia,
-  getFeePreview,
   publishCampaign,
   applyToCampaign,
   getMyProposals,
@@ -31,7 +30,6 @@ const {
   createDraftCampaignSchema,
   updateDraftCampaignSchema,
   addProductSchema,
-  publishCampaignSchema,
   applyCampaignSchema,
 } = require('../validators/campaign.validator');
 const { ROLES } = require('../constants/enums');
@@ -39,7 +37,6 @@ const { ROLES } = require('../constants/enums');
 // specific static paths BEFORE the /:id catch-all
 router.get('/proposals/me', protect, authorize(ROLES.CREATOR), getMyProposals);
 router.get('/saved/me', protect, getSavedCampaigns);
-router.get('/fee-preview', protect, authorize(ROLES.BRAND), getFeePreview);
 
 router.get('/', listCampaigns);
 router.post('/draft', protect, authorize(ROLES.BRAND), validate(createDraftCampaignSchema), createDraftCampaign);
@@ -68,7 +65,7 @@ router.post(
   uploadCampaignMedia
 );
 
-router.post('/:id/publish', protect, authorize(ROLES.BRAND), validate(publishCampaignSchema), publishCampaign);
+router.post('/:id/publish', protect, authorize(ROLES.BRAND), publishCampaign);
 
 router.post('/:id/apply', protect, authorize(ROLES.CREATOR), validate(applyCampaignSchema), applyToCampaign);
 router.post('/:id/save', protect, toggleSaveCampaign);
