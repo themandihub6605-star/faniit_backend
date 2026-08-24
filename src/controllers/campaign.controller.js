@@ -13,86 +13,21 @@ const {
   LOCATION_TYPE,
 } = require('../constants/enums');
 
-// query params supported: category (comma-separated ids), campaignType
-// (comma-separated 'paid,barter'), deliverables (comma-separated
-// 'reel,story,post' — matches campaigns requiring at least one of the
-// selected types), minBudget/maxBudget (rupees, converted to paise),
-// locationType (comma-separated), location (free-text match against
-// locationValue/location), minFollowers/maxFollowers, gender
-// (comma-separated 'male,female,other')
 const listCampaigns = catchAsync(async (req, res) => {
-  const {
-    category,
-    status = CAMPAIGN_STATUS.OPEN,
-    page = 1,
-    limit = 20,
-    campaignType,
-    deliverables,
-    minBudget,
-    maxBudget,
-    locationType,
-    location,
-    minFollowers,
-    maxFollowers,
-    gender,
-  } = req.query;
+  const { category, status = CAMPAIGN_STATUS.OPEN, page = 1, limit = 20 } = req.query;
 
   const filter = {};
+  if (category) filter.category = category;
   if (status) filter.status = status;
 
-  if (category) {
-    const ids = category.split(',').filter(Boolean);
-    if (ids.length) filter.category = { $in: ids };
-  }
+  const campaigns = await Campaign.find(filter)
+    .populate({ path: 'brand', populate: { path: 'user', select: 'name avatarUrl' } })
+    .populate('category', 'label icon')
+    .sort({ createdAt: -1 })
+    .skip((page - 1) * limit)
+    .limit(Number(limit));
 
-  if (campaignType) {
-    const types = campaignType.split(',').filter(Boolean);
-    if (types.length) filter.campaignType = { $in: types };
-  }
-
-  if (deliverables) {
-    const fields = deliverables.split(',').filter(Boolean);
-    const or = fields.filter((f) => ['reel', 'story', 'post'].includes(f)).map((f) => ({ [`deliverables.${f}`]: { $gt: 0 } }));
-    if (or.length) filter.$or = or;
-  }
-
-  if (minBudget || maxBudget) {
-    filter.budget = {};
-    if (minBudget) filter.budget.$gte = Math.round(Number(minBudget) * 100);
-    if (maxBudget) filter.budget.$lte = Math.round(Number(maxBudget) * 100);
-  }
-
-  if (locationType) {
-    const types = locationType.split(',').filter(Boolean);
-    if (types.length) filter.locationType = { $in: types };
-  }
-  if (location) {
-    filter.$and = [
-      ...(filter.$and || []),
-      { $or: [{ locationValue: new RegExp(location, 'i') }, { location: new RegExp(location, 'i') }] },
-    ];
-  }
-
-  if (minFollowers || maxFollowers) {
-    filter.minFollowers = {};
-    if (minFollowers) filter.minFollowers.$gte = Number(minFollowers);
-    if (maxFollowers) filter.minFollowers.$lte = Number(maxFollowers);
-  }
-
-  if (gender) {
-    const genders = gender.split(',').filter(Boolean);
-    if (genders.length) filter.genderTarget = { $in: genders };
-  }
-
-  const [campaigns, total] = await Promise.all([
-    Campaign.find(filter)
-      .populate({ path: 'brand', populate: { path: 'user', select: 'name avatarUrl' } })
-      .populate('category', 'label icon')
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(Number(limit)),
-    Campaign.countDocuments(filter),
-  ]);
+  const total = await Campaign.countDocuments(filter);
 
   return new ApiResponse(200, { campaigns, total, page: Number(page), pages: Math.ceil(total / limit) }, 'Campaigns fetched').send(res);
 });
@@ -263,13 +198,15 @@ const publishCampaign = catchAsync(async (req, res) => {
 const applyToCampaign = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can apply to campaigns');
 
-  const { pitch, quotedAmount, deliverables } = req.body;
+  const { pitch, quotedAmount, portfolioLinks, deliveryTimeline } = req.body;
 
   const campaign = await Campaign.findById(req.params.id);
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (campaign.status !== CAMPAIGN_STATUS.OPEN) throw ApiError.badRequest('This campaign is no longer accepting applications');
 
   const creator = await CreatorProfile.findOne({ user: req.user._id });
+  if (!creator) throw ApiError.notFound('Creator profile not found');
+
   const existing = await Application.findOne({ campaign: campaign._id, creator: creator._id });
   if (existing) throw ApiError.conflict('You have already applied to this campaign');
 
@@ -278,7 +215,8 @@ const applyToCampaign = catchAsync(async (req, res) => {
     creator: creator._id,
     pitch,
     quotedAmount: quotedAmount ?? null,
-    deliverables: deliverables || [],
+    portfolioLinks: (portfolioLinks || []).filter(Boolean),
+    deliveryTimeline: deliveryTimeline || '',
   });
 
   campaign.applicantCount += 1;

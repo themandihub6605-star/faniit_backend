@@ -7,6 +7,10 @@ const applicationSchema = new mongoose.Schema(
     creator: { type: mongoose.Schema.Types.ObjectId, ref: 'CreatorProfile', required: true, index: true },
 
     pitch: { type: String, maxlength: 1000, default: '' },
+    quotedAmount: { type: Number, default: null }, // in paise, null = accepts posted budget
+    portfolioLinks: { type: [String], default: [] }, // up to 3 links to relevant past work
+    deliveryTimeline: { type: String, default: '' }, // e.g. "3 days", "1 week" — creator's estimated turnaround
+
     status: { type: String, enum: Object.values(APPLICATION_STATUS), default: APPLICATION_STATUS.PENDING },
   },
   { timestamps: true }

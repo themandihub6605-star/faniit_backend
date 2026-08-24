@@ -50,7 +50,8 @@ const addProductSchema = z.object({
 const applyCampaignSchema = z.object({
   pitch: z.string().max(1000).optional(),
   quotedAmount: z.number().min(0).optional(),
-  deliverables: z.array(z.string()).optional(),
+  portfolioLinks: z.array(z.string().url('Please enter a valid URL')).max(3, 'You can add up to 3 links').optional(),
+  deliveryTimeline: z.string().max(100).optional(),
 });
 
 module.exports = {
