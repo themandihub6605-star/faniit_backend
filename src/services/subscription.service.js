@@ -1,6 +1,5 @@
 const razorpay = require('../config/razorpay');
 const { User, SubscriptionPlan, UserSubscription, Transaction } = require('../models');
-const { debitUser } = require('./wallet.service');
 const ApiError = require('../utils/apiError');
 const { BILLING_CYCLE, SUBSCRIPTION_STATUS, TRANSACTION_TYPE, TRANSACTION_STATUS, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
 
@@ -31,9 +30,6 @@ async function ensureRazorpayPlan(plan) {
     plan.razorpayPlanId = rzpPlan.id;
     await plan.save();
   }
-  // Razorpay plans are immutable once created — if price/cycle changes,
-  // the admin controller creates a fresh Razorpay plan and swaps the id
-  // (see admin controller's plan update handler).
   return plan;
 }
 
@@ -67,14 +63,9 @@ async function getOrCreateActiveSubscription(userId, appliesTo) {
     const isPaidPlanStillActive = sub.plan.price > 0 && sub.status === SUBSCRIPTION_STATUS.ACTIVE && sub.razorpaySubscriptionId && !sub.cancelAtPeriodEnd;
 
     if (isPaidPlanStillActive) {
-      // Renewal should have arrived via the subscription.charged webhook
-      // already; if we're here it just hasn't landed yet — roll the
-      // window forward optimistically rather than block the user.
       sub.currentPeriodStart = sub.currentPeriodEnd;
       sub.currentPeriodEnd = addCycle(sub.currentPeriodEnd, sub.plan.billingCycle);
     } else {
-      // Free plan cycle rollover, or a paid plan that lapsed/was
-      // cancelled — reset onto the role's default plan.
       const defaultPlan = await getDefaultPlan(appliesTo);
       sub.plan = defaultPlan._id;
       sub.status = SUBSCRIPTION_STATUS.ACTIVE;
@@ -109,6 +100,11 @@ async function consumeCreatorProposal(userId) {
         `You've used all ${plan.proposalLimit} proposals for this cycle. Extra proposals cost ₹${(plan.extraProposalCost / 100).toFixed(2)} — please add money to your wallet.`
       );
     }
+    // Lazy require: wallet.service.js requires this file back (for
+    // getCreatorPlanFields), so a top-level require here would create a
+    // circular-dependency load order issue — requiring it inside the
+    // function body sidesteps that.
+    const { debitUser } = require('./wallet.service');
     await debitUser(userId, plan.extraProposalCost);
     await Transaction.create({
       type: TRANSACTION_TYPE.EXTRA_PROPOSAL_FEE,

@@ -1,7 +1,6 @@
 const { User, CreatorProfile, AgencyProfile, SiteSettings } = require('../models');
 const env = require('../config/env');
 const { creditReferralCommission } = require('./referral.service');
-const { getCreatorPlanFields } = require('./subscription.service');
 
 /**
  * Splits a gross amount into platform commission, agency commission (if the
@@ -18,6 +17,11 @@ async function splitEarnings(grossAmount, creatorProfileId, relatedModel = null,
 
   let commissionPercent;
   try {
+    // Lazy require: subscription.service.js requires this file back (for
+    // debitUser), so a top-level require here would create a
+    // circular-dependency load order issue — requiring it inside the
+    // function body sidesteps that.
+    const { getCreatorPlanFields } = require('./subscription.service');
     const plan = creator?.user ? await getCreatorPlanFields(creator.user) : null;
     commissionPercent = plan ? plan.platformFeePercent : null;
   } catch {
