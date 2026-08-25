@@ -38,6 +38,10 @@ const updateDraftCampaignSchema = z.object({
       post: z.number().min(0).optional(),
     })
     .optional(),
+  // Only meaningful for brands whose active plan has canSetApplicantLimit
+  // — enforcement of that permission happens at publish time in the
+  // controller, this schema only validates the shape of the value itself.
+  applicantLimit: z.number().min(1).nullable().optional(),
 });
 
 const addProductSchema = z.object({

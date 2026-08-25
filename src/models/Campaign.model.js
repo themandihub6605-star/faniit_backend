@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { CAMPAIGN_STATUS, LOCATION_TYPE, CAMPAIGN_TYPE, GENDER_TARGET } = require('../constants/enums');
+const { CAMPAIGN_STATUS, LOCATION_TYPE, CAMPAIGN_TYPE, GENDER_TARGET, CAMPAIGN_VISIBILITY_TIER } = require('../constants/enums');
 
 const campaignProductSchema = new mongoose.Schema(
   {
@@ -17,41 +17,31 @@ const campaignSchema = new mongoose.Schema(
     brand: { type: mongoose.Schema.Types.ObjectId, ref: 'BrandProfile', required: true, index: true },
 
     title: { type: String, required: true, trim: true },
-    // description becomes required only at publish time (see controller) —
-    // kept optional at schema level so a draft can be created with just a
-    // title on step 1.
     description: { type: String, maxlength: 2000, default: '' },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', default: null },
 
     campaignType: { type: String, enum: Object.values(CAMPAIGN_TYPE), default: CAMPAIGN_TYPE.PAID },
 
-    // For paid campaigns, budget is DERIVED (costPerInfluencer x
-    // maxInfluencers) — computed server-side in updateDraftCampaign,
-    // never trusted from the client directly. For barter campaigns budget
-    // stays 0 and `products` is what's actually offered.
     costPerInfluencer: { type: Number, default: 0 }, // in paise
-    budget: { type: Number, default: 0 }, // total campaign budget, in paise — derived for paid campaigns
-    products: { type: [campaignProductSchema], default: [] }, // required for barter; optional bonus freebies on paid campaigns
+    budget: { type: Number, default: 0 }, // derived: costPerInfluencer x maxInfluencers, for paid campaigns
+    products: { type: [campaignProductSchema], default: [] },
 
-    durationLabel: { type: String, default: '' }, // e.g. "2-week campaign"
+    durationLabel: { type: String, default: '' },
 
-    // legacy free-text location, kept so existing frontend cards/detail pages
-    // that read `campaign.location` keep working unchanged. Derived from
-    // locationType/locationValue whenever those are set.
     location: { type: String, default: 'Remote' },
     locationType: { type: String, enum: Object.values(LOCATION_TYPE), default: LOCATION_TYPE.PAN_INDIA },
-    locationValue: { type: String, default: '' }, // state or city name, when not Pan India
+    locationValue: { type: String, default: '' },
 
-    creatorRequirement: { type: String, default: '' }, // free-text fallback
+    creatorRequirement: { type: String, default: '' },
 
-    influencerCategories: { type: [String], default: [] }, // tags e.g. "Content Creator"
+    influencerCategories: { type: [String], default: [] },
     genderTarget: { type: [String], enum: Object.values(GENDER_TARGET), default: [] },
     ageRange: {
       min: { type: Number, default: 18 },
       max: { type: Number, default: 45 },
     },
     minFollowers: { type: Number, default: null },
-    maxInfluencers: { type: Number, default: 1 }, // "Number of Influencers Required" — informational for now; single-creator accept flow is still what's wired up end-to-end
+    maxInfluencers: { type: Number, default: 1 },
 
     dos: { type: [String], default: [] },
     donts: { type: [String], default: [] },
@@ -69,9 +59,19 @@ const campaignSchema = new mongoose.Schema(
 
     publishedAt: { type: Date, default: null },
 
+    // --- Subscription-driven fields, set automatically at publish time
+    // from the posting brand's active plan (see publishCampaign) ---
+    visibilityTier: { type: String, enum: Object.values(CAMPAIGN_VISIBILITY_TIER), default: CAMPAIGN_VISIBILITY_TIER.LITE },
+    isFeatured: { type: Boolean, default: false }, // Elite-brand perk — shown first, "Featured" badge
+    // The moment non-early-access (Lite) creators are allowed to apply.
+    // Pro creators can apply immediately regardless of this timestamp.
+    publicVisibleAt: { type: Date, default: null },
+    // Optional cap on total applicants — only settable by brands whose plan
+    // allows it (SubscriptionPlan.canSetApplicantLimit).
+    applicantLimit: { type: Number, default: null },
+
     assignedCreator: { type: mongoose.Schema.Types.ObjectId, ref: 'CreatorProfile', default: null },
 
-    // escrow tracking
     escrowTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', default: null },
     isEscrowFunded: { type: Boolean, default: false },
     isEscrowReleased: { type: Boolean, default: false },

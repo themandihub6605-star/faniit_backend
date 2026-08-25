@@ -1,7 +1,8 @@
-const { Campaign, Application, BrandProfile, CreatorProfile, User } = require('../models');
+const { Campaign, Application, BrandProfile, CreatorProfile, User, SiteSettings } = require('../models');
 const paymentService = require('../services/payment.service');
 const escrowService = require('../services/escrow.service');
 const notificationService = require('../services/notification.service');
+const subscriptionService = require('../services/subscription.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -11,6 +12,8 @@ const {
   APPLICATION_STATUS,
   CAMPAIGN_TYPE,
   LOCATION_TYPE,
+  CAMPAIGN_VISIBILITY_TIER,
+  CREATOR_CAMPAIGN_ACCESS,
 } = require('../constants/enums');
 
 const listCampaigns = catchAsync(async (req, res) => {
@@ -23,7 +26,7 @@ const listCampaigns = catchAsync(async (req, res) => {
   const campaigns = await Campaign.find(filter)
     .populate({ path: 'brand', populate: { path: 'user', select: 'name avatarUrl' } })
     .populate('category', 'label icon')
-    .sort({ createdAt: -1 })
+    .sort({ isFeatured: -1, createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(Number(limit));
 
@@ -76,6 +79,16 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
   if (campaign.status !== CAMPAIGN_STATUS.DRAFT) throw ApiError.conflict('Only draft campaigns can be edited this way');
+
+  // applicantLimit is only settable if the brand's active plan allows it —
+  // silently dropped (not an error) if they're not entitled to it, so the
+  // rest of the draft update still succeeds.
+  if (req.body.applicantLimit !== undefined) {
+    const brandPlan = await subscriptionService.getBrandPlanFields(req.user._id);
+    if (brandPlan.canSetApplicantLimit) {
+      campaign.applicantLimit = req.body.applicantLimit;
+    }
+  }
 
   const editableFields = [
     'title',
@@ -177,6 +190,12 @@ function assertPublishable(campaign) {
   if (missing.length) throw ApiError.badRequest(`Please complete before publishing: ${missing.join(', ')}`);
 }
 
+// --- Final step: go live. No fee — publishing itself is free. What DOES
+// happen here: (1) the brand's plan campaign-post quota is consumed
+// (throws if exhausted), (2) the campaign is stamped with the visibility
+// tier / featured flag / early-access cutoff that flow from their plan.
+// Escrow only comes into play later, when the brand accepts a creator's
+// bid (see initiateEscrowFunding/verifyEscrowPayment below). ---
 const publishCampaign = catchAsync(async (req, res) => {
   const campaign = await Campaign.findById(req.params.id).populate('brand');
   if (!campaign) throw ApiError.notFound('Campaign not found');
@@ -185,8 +204,15 @@ const publishCampaign = catchAsync(async (req, res) => {
 
   assertPublishable(campaign);
 
+  await subscriptionService.consumeBrandCampaignSlot(req.user._id);
+  const brandPlan = await subscriptionService.getBrandPlanFields(req.user._id);
+  const settings = await SiteSettings.getSingleton();
+
   campaign.status = CAMPAIGN_STATUS.OPEN;
   campaign.publishedAt = new Date();
+  campaign.visibilityTier = brandPlan.campaignVisibilityTier;
+  campaign.isFeatured = brandPlan.isFeaturedListing;
+  campaign.publicVisibleAt = new Date(Date.now() + settings.creatorEarlyAccessHours * 3600 * 1000);
   await campaign.save();
 
   campaign.brand.totalCampaigns += 1;
@@ -195,6 +221,11 @@ const publishCampaign = catchAsync(async (req, res) => {
   return new ApiResponse(200, campaign, 'Campaign published').send(res);
 });
 
+// --- A creator applying consumes their plan's proposal quota (or
+// auto-charges the extra-proposal fee), and is gated by two subscription
+// checks before that even happens: exclusive-campaign access, and
+// early-access timing. Both throw a clear, actionable message rather than
+// a generic 403. ---
 const applyToCampaign = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can apply to campaigns');
 
@@ -204,11 +235,27 @@ const applyToCampaign = catchAsync(async (req, res) => {
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (campaign.status !== CAMPAIGN_STATUS.OPEN) throw ApiError.badRequest('This campaign is no longer accepting applications');
 
+  const creatorPlan = await subscriptionService.getCreatorPlanFields(req.user._id);
+
+  if (campaign.visibilityTier === CAMPAIGN_VISIBILITY_TIER.EXCLUSIVE && creatorPlan.campaignAccessTier !== CREATOR_CAMPAIGN_ACCESS.ALL) {
+    throw ApiError.forbidden('This is an exclusive campaign for Pro creators. Upgrade your plan to apply.');
+  }
+
+  if (!creatorPlan.hasEarlyAccess && campaign.publicVisibleAt && new Date() < campaign.publicVisibleAt) {
+    throw ApiError.forbidden('This campaign is not open to your plan yet — please check back later, or upgrade for early access.');
+  }
+
+  if (campaign.applicantLimit != null && campaign.applicantCount >= campaign.applicantLimit) {
+    throw ApiError.conflict('This campaign has reached its applicant limit.');
+  }
+
   const creator = await CreatorProfile.findOne({ user: req.user._id });
   if (!creator) throw ApiError.notFound('Creator profile not found');
 
   const existing = await Application.findOne({ campaign: campaign._id, creator: creator._id });
   if (existing) throw ApiError.conflict('You have already applied to this campaign');
+
+  await subscriptionService.consumeCreatorProposal(req.user._id);
 
   const application = await Application.create({
     campaign: campaign._id,
@@ -272,10 +319,14 @@ const getApplications = catchAsync(async (req, res) => {
 });
 
 const decideApplication = catchAsync(async (req, res) => {
-  const { decision, feedback } = req.body;
+  const { decision, feedback, rejectionReason } = req.body;
   const campaign = await Campaign.findById(req.params.id).populate('brand');
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
+
+  if (decision === 'rejected' && !rejectionReason?.trim()) {
+    throw ApiError.badRequest('Please provide a reason for declining this proposal');
+  }
 
   const application = await Application.findById(req.params.appId);
   if (!application) throw ApiError.notFound('Application not found');
@@ -283,6 +334,7 @@ const decideApplication = catchAsync(async (req, res) => {
   application.status = decision === 'accepted' ? APPLICATION_STATUS.ACCEPTED : APPLICATION_STATUS.REJECTED;
   application.respondedAt = new Date();
   if (feedback) application.feedback = feedback;
+  if (decision === 'rejected') application.rejectionReason = rejectionReason.trim();
   await application.save();
 
   if (decision === 'accepted') {
@@ -297,7 +349,7 @@ const decideApplication = catchAsync(async (req, res) => {
     message:
       decision === 'accepted'
         ? `You've been accepted for "${campaign.title}". Waiting for the brand to fund escrow.`
-        : `Your proposal for "${campaign.title}" was declined.`,
+        : `Your proposal for "${campaign.title}" was declined: ${rejectionReason.trim()}`,
     relatedModel: 'Campaign',
     relatedId: campaign._id,
   });

@@ -14,6 +14,8 @@ router.get('/users', admin.listUsers);
 router.get('/users/:id', admin.getUserDetail);
 router.patch('/users/:id/suspend', admin.suspendUser);
 router.patch('/users/:id/reinstate', admin.reinstateUser);
+router.get('/users/:id/subscription', admin.getUserSubscription);
+router.patch('/users/:id/subscription', admin.setUserSubscription);
 
 // Verification
 router.get('/verifications/pending', admin.listPendingVerifications);
@@ -67,5 +69,11 @@ router.get('/categories', admin.listCategoriesAdmin);
 router.post('/categories', admin.createCategory);
 router.patch('/categories/:id', admin.updateCategory);
 router.delete('/categories/:id', admin.deleteCategory);
+
+// Subscription plans (Creator Lite/Pro, Brand Lite/Pro/Elite)
+router.get('/subscription-plans', admin.listSubscriptionPlansAdmin);
+router.post('/subscription-plans', admin.createSubscriptionPlan);
+router.patch('/subscription-plans/:id', admin.updateSubscriptionPlan);
+router.delete('/subscription-plans/:id', admin.deleteSubscriptionPlan);
 
 module.exports = router;

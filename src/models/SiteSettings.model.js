@@ -13,14 +13,16 @@ const siteSettingsSchema = new mongoose.Schema(
     maintenanceMessage: { type: String, default: '' },
     homepageBannerText: { type: String, default: '' },
 
-    // Campaign publishing fee — charged from the brand's wallet when they
-    // publish a campaign (see campaign.controller.js publishCampaign).
-    campaignPostingFee: { type: Number, default: 50000, min: 0 }, // in paise (₹500)
+    // Campaign publishing fee — currently unused (publishing is free), kept
+    // in case a posting fee is re-enabled later.
+    campaignPostingFee: { type: Number, default: 50000, min: 0 },
     campaignPostingFeeTaxPercent: { type: Number, default: 18, min: 0, max: 100 },
-    // Admin-facing test/QA switch — when true, EVERY brand can publish
-    // campaigns for free regardless of wallet balance. Meant to be flipped
-    // on temporarily while this flow is being tested, then off again.
     allowFreeCampaignPublish: { type: Boolean, default: false },
+
+    // Subscriptions: how many hours a non-early-access creator (Lite) must
+    // wait after a campaign is published before they're allowed to apply.
+    // Pro creators (plan.hasEarlyAccess) skip this wait entirely.
+    creatorEarlyAccessHours: { type: Number, default: 6, min: 0 },
   },
   { timestamps: true, _id: false }
 );

@@ -12,13 +12,16 @@ const {
   Withdrawal,
   SiteSettings,
   Notification,
+  SubscriptionPlan,
+  UserSubscription,
 } = require('../models');
 const escrowService = require('../services/escrow.service');
+const subscriptionService = require('../services/subscription.service');
 const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { VERIFICATION_STATUS, TRANSACTION_STATUS, ROLES } = require('../constants/enums');
+const { VERIFICATION_STATUS, TRANSACTION_STATUS, ROLES, SUBSCRIPTION_STATUS } = require('../constants/enums');
 
 // ---------- Users ----------
 
@@ -299,6 +302,14 @@ const getAnalyticsOverview = catchAsync(async (req, res) => {
     { $limit: 12 },
   ]);
 
+  const activeSubscriptionsAgg = await UserSubscription.aggregate([
+    { $match: { status: SUBSCRIPTION_STATUS.ACTIVE } },
+    { $lookup: { from: 'subscriptionplans', localField: 'plan', foreignField: '_id', as: 'planDoc' } },
+    { $unwind: '$planDoc' },
+    { $match: { 'planDoc.price': { $gt: 0 } } },
+    { $group: { _id: '$planDoc.name', count: { $sum: 1 } } },
+  ]);
+
   return new ApiResponse(
     200,
     {
@@ -311,6 +322,7 @@ const getAnalyticsOverview = catchAsync(async (req, res) => {
       totalPlatformCommission: revenueAgg[0]?.totalPlatformCommission || 0,
       totalInEscrow: escrowAgg[0]?.totalInEscrow || 0,
       monthlyRevenue,
+      activeSubscriptionsByPlan: activeSubscriptionsAgg,
     },
     'Analytics fetched'
   ).send(res);
@@ -413,7 +425,7 @@ const getSiteSettings = catchAsync(async (req, res) => {
 });
 
 const updateSiteSettings = catchAsync(async (req, res) => {
-  const { platformCommissionPercent, supportEmail, maintenanceMode, maintenanceMessage, homepageBannerText } = req.body;
+  const { platformCommissionPercent, supportEmail, maintenanceMode, maintenanceMessage, homepageBannerText, creatorEarlyAccessHours } = req.body;
   const settings = await SiteSettings.getSingleton();
 
   if (platformCommissionPercent !== undefined) settings.platformCommissionPercent = platformCommissionPercent;
@@ -421,6 +433,7 @@ const updateSiteSettings = catchAsync(async (req, res) => {
   if (maintenanceMode !== undefined) settings.maintenanceMode = maintenanceMode;
   if (maintenanceMessage !== undefined) settings.maintenanceMessage = maintenanceMessage;
   if (homepageBannerText !== undefined) settings.homepageBannerText = homepageBannerText;
+  if (creatorEarlyAccessHours !== undefined) settings.creatorEarlyAccessHours = creatorEarlyAccessHours;
 
   await settings.save();
   return new ApiResponse(200, settings, 'Site settings updated').send(res);
@@ -467,6 +480,150 @@ const createAdmin = catchAsync(async (req, res) => {
   return new ApiResponse(201, admin.toSafeObject(), 'Admin account created').send(res);
 });
 
+// ---------- Subscription plans (Creator Lite/Pro, Brand Lite/Pro/Elite) ----------
+
+/** GET /api/admin/subscription-plans?appliesTo=creator|brand — unlike the
+ * public listPlans endpoint, this returns inactive plans too, so Admin can
+ * re-enable a retired plan without recreating it from scratch. */
+const listSubscriptionPlansAdmin = catchAsync(async (req, res) => {
+  const { appliesTo } = req.query;
+  const filter = {};
+  if (appliesTo) filter.appliesTo = appliesTo;
+
+  const plans = await SubscriptionPlan.find(filter).sort({ appliesTo: 1, sortOrder: 1, price: 1 });
+  return new ApiResponse(200, plans, 'Subscription plans fetched').send(res);
+});
+
+const createSubscriptionPlan = catchAsync(async (req, res) => {
+  const { name, slug, appliesTo, isDefault } = req.body;
+  if (!name || !slug || !appliesTo) throw ApiError.badRequest('name, slug and appliesTo are required');
+
+  const existing = await SubscriptionPlan.findOne({ slug });
+  if (existing) throw ApiError.conflict('A plan with this slug already exists');
+
+  // Exactly one default plan per role — if this one is being made default,
+  // unset the flag on whichever plan currently holds it.
+  if (isDefault) {
+    await SubscriptionPlan.updateMany({ appliesTo, isDefault: true }, { isDefault: false });
+  }
+
+  const plan = await SubscriptionPlan.create(req.body);
+
+  // Paid plans get their Razorpay Plan object created immediately so the
+  // pricing page never has to wait on that at checkout time.
+  if (plan.price > 0) await subscriptionService.ensureRazorpayPlan(plan);
+
+  return new ApiResponse(201, plan, 'Subscription plan created').send(res);
+});
+
+const updateSubscriptionPlan = catchAsync(async (req, res) => {
+  const plan = await SubscriptionPlan.findById(req.params.id);
+  if (!plan) throw ApiError.notFound('Subscription plan not found');
+
+  if (req.body.isDefault === true && !plan.isDefault) {
+    await SubscriptionPlan.updateMany({ appliesTo: plan.appliesTo, isDefault: true }, { isDefault: false });
+  }
+
+  // Razorpay plans are immutable — if price or billing cycle is changing on
+  // a plan that already has one, drop the old id so the next checkout
+  // creates a fresh Razorpay plan. Existing subscribers keep renewing on
+  // their original Razorpay plan/price until their own cycle rolls over
+  // onto whatever plan they're moved to — this only affects NEW checkouts.
+  const priceChanging = req.body.price !== undefined && req.body.price !== plan.price;
+  const cycleChanging = req.body.billingCycle !== undefined && req.body.billingCycle !== plan.billingCycle;
+  if ((priceChanging || cycleChanging) && plan.razorpayPlanId) {
+    plan.razorpayPlanId = '';
+  }
+
+  const editableFields = [
+    'name',
+    'price',
+    'billingCycle',
+    'isActive',
+    'isDefault',
+    'sortOrder',
+    'proposalLimit',
+    'extraProposalCost',
+    'platformFeePercent',
+    'campaignAccessTier',
+    'hasEarlyAccess',
+    'campaignPostLimit',
+    'campaignVisibilityTier',
+    'canSetApplicantLimit',
+    'isFeaturedListing',
+    'description',
+    'perks',
+  ];
+  editableFields.forEach((field) => {
+    if (req.body[field] !== undefined) plan[field] = req.body[field];
+  });
+
+  await plan.save();
+
+  if (plan.price > 0 && !plan.razorpayPlanId) await subscriptionService.ensureRazorpayPlan(plan);
+
+  return new ApiResponse(200, plan, 'Subscription plan updated').send(res);
+});
+
+/** Soft-deletes a plan (isActive: false) rather than removing it — existing
+ * UserSubscription docs still reference it by id, and deleting the plan
+ * document out from under them would break their `.populate('plan')`. */
+const deleteSubscriptionPlan = catchAsync(async (req, res) => {
+  const plan = await SubscriptionPlan.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
+  if (!plan) throw ApiError.notFound('Subscription plan not found');
+  return new ApiResponse(200, plan, 'Subscription plan deactivated').send(res);
+});
+
+// ---------- Per-user subscription override (support tooling) ----------
+
+const getUserSubscription = catchAsync(async (req, res) => {
+  const sub = await UserSubscription.findOne({ user: req.params.id }).populate('plan');
+  if (!sub) return new ApiResponse(200, null, 'This user has no subscription record yet').send(res);
+  return new ApiResponse(200, sub, 'User subscription fetched').send(res);
+});
+
+/** PATCH /api/admin/users/:id/subscription — manually move a user onto a
+ * different plan (e.g. comp'ing a Pro plan, or resolving a support issue),
+ * bypassing Razorpay entirely. Optionally extend the current period. */
+const setUserSubscription = catchAsync(async (req, res) => {
+  const { planId, periodDays } = req.body;
+  if (!planId) throw ApiError.badRequest('planId is required');
+
+  const plan = await SubscriptionPlan.findById(planId);
+  if (!plan) throw ApiError.notFound('Plan not found');
+
+  const targetUser = await User.findById(req.params.id);
+  if (!targetUser) throw ApiError.notFound('User not found');
+
+  const expectedRole = plan.appliesTo === 'brand' ? ROLES.BRAND : ROLES.CREATOR;
+  if (targetUser.role !== expectedRole) {
+    throw ApiError.badRequest(`This plan is for ${plan.appliesTo}s, but the user's role is ${targetUser.role}`);
+  }
+
+  let sub = await UserSubscription.findOne({ user: targetUser._id });
+  const periodEnd = periodDays
+    ? new Date(Date.now() + periodDays * 24 * 3600 * 1000)
+    : subscriptionService.addCycle(new Date(), plan.billingCycle);
+
+  if (!sub) {
+    sub = new UserSubscription({ user: targetUser._id });
+  }
+  sub.plan = plan._id;
+  sub.status = SUBSCRIPTION_STATUS.ACTIVE;
+  sub.currentPeriodStart = new Date();
+  sub.currentPeriodEnd = periodEnd;
+  sub.proposalsUsedThisCycle = 0;
+  sub.campaignsPostedThisCycle = 0;
+  // An admin-assigned plan isn't billed through Razorpay — clear any old
+  // link so cancel/renewal logic doesn't try to touch a Razorpay subscription
+  // this override didn't create.
+  sub.razorpaySubscriptionId = '';
+  sub.cancelAtPeriodEnd = false;
+  await sub.save();
+
+  return new ApiResponse(200, sub, `User moved to ${plan.name}`).send(res);
+});
+
 module.exports = {
   listUsers,
   getUserDetail,
@@ -503,4 +660,10 @@ module.exports = {
   deleteCategory,
   listAdmins,
   createAdmin,
+  listSubscriptionPlansAdmin,
+  createSubscriptionPlan,
+  updateSubscriptionPlan,
+  deleteSubscriptionPlan,
+  getUserSubscription,
+  setUserSubscription,
 };

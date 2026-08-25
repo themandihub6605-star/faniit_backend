@@ -21,4 +21,6 @@ module.exports = {
   ReferralConfig: require('./ReferralConfig.model'),
   Withdrawal: require('./Withdrawal.model'),
   SiteSettings: require('./SiteSettings.model'),
+  SubscriptionPlan: require('./SubscriptionPlan.model'),
+  UserSubscription: require('./UserSubscription.model'),
 };

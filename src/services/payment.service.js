@@ -34,6 +34,18 @@ function verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySi
   return expectedSignature === razorpaySignature;
 }
 
+/** Razorpay's subscription-checkout signature uses a different concatenation
+ * order than order-based checkout: `paymentId|subscriptionId` instead of
+ * `orderId|paymentId`. */
+function verifySubscriptionSignature({ razorpaySubscriptionId, razorpayPaymentId, razorpaySignature }) {
+  const expectedSignature = crypto
+    .createHmac('sha256', env.razorpay.keySecret)
+    .update(`${razorpayPaymentId}|${razorpaySubscriptionId}`)
+    .digest('hex');
+
+  return expectedSignature === razorpaySignature;
+}
+
 /** Verifies the signature on incoming Razorpay webhook payloads. */
 function verifyWebhookSignature(rawBody, signature) {
   const expectedSignature = crypto
@@ -63,4 +75,10 @@ async function createPayout(fundAccountId, amount, referenceId) {
   };
 }
 
-module.exports = { createOrder, verifyPaymentSignature, verifyWebhookSignature, createPayout };
+module.exports = {
+  createOrder,
+  verifyPaymentSignature,
+  verifySubscriptionSignature,
+  verifyWebhookSignature,
+  createPayout,
+};

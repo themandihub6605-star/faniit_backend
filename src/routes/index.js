@@ -21,6 +21,7 @@ router.use('/gifts', require('./gift.routes'));
 router.use('/posts', require('./post.routes'));
 router.use('/wallet', require('./wallet.routes'));
 router.use('/admin', require('./admin.routes'));
+router.use('/subscriptions', require('./subscription.routes'));
 
 router.get('/health', (req, res) => res.json({ success: true, message: 'Fanitt API is running' }));
 

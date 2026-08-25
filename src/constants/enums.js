@@ -45,6 +45,8 @@ const TRANSACTION_TYPE = Object.freeze({
   AGENCY_COMMISSION: 'agency_commission',
   REFERRAL_COMMISSION: 'referral_commission',
   PLATFORM_COMMISSION: 'platform_commission',
+  SUBSCRIPTION_PAYMENT: 'subscription_payment',
+  EXTRA_PROPOSAL_FEE: 'extra_proposal_fee',
   REFUND: 'refund',
 });
 
@@ -82,6 +84,34 @@ const GENDER_TARGET = Object.freeze({
   OTHER: 'other',
 });
 
+// --- Subscriptions ---
+const SUBSCRIPTION_APPLIES_TO = Object.freeze({
+  CREATOR: 'creator',
+  BRAND: 'brand',
+});
+
+const BILLING_CYCLE = Object.freeze({
+  MONTHLY: 'monthly',
+  YEARLY: 'yearly',
+});
+
+const SUBSCRIPTION_STATUS = Object.freeze({
+  ACTIVE: 'active',
+  PAST_DUE: 'past_due',
+  CANCELLED: 'cancelled',
+  EXPIRED: 'expired',
+});
+
+const CAMPAIGN_VISIBILITY_TIER = Object.freeze({
+  LITE: 'lite',
+  EXCLUSIVE: 'exclusive',
+});
+
+const CREATOR_CAMPAIGN_ACCESS = Object.freeze({
+  LITE_ONLY: 'lite_only', // can only apply to 'lite' tier campaigns
+  ALL: 'all', // can apply to lite + exclusive
+});
+
 module.exports = {
   ROLES,
   SESSION_TYPES,
@@ -94,4 +124,9 @@ module.exports = {
   LOCATION_TYPE,
   CAMPAIGN_TYPE,
   GENDER_TARGET,
+  SUBSCRIPTION_APPLIES_TO,
+  BILLING_CYCLE,
+  SUBSCRIPTION_STATUS,
+  CAMPAIGN_VISIBILITY_TIER,
+  CREATOR_CAMPAIGN_ACCESS,
 };
