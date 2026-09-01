@@ -11,10 +11,12 @@ const {
   uploadLogo,
   followBrand,
 } = require('../controllers/brand.controller');
-const { protect } = require('../middlewares/auth.middleware');
+const { protect, optionalAuth } = require('../middlewares/auth.middleware');
 const { uploadImage } = require('../middlewares/upload.middleware');
 
-router.get('/', listBrands);
+// optionalAuth so tier-matched visibility (Point 5) can see who's asking
+// — without requiring login, since this listing stays public either way.
+router.get('/', optionalAuth, listBrands);
 router.get('/me', protect, getMyProfile);
 router.get('/me/dashboard', protect, getMyDashboard);
 router.patch('/me', protect, updateMyProfile);

@@ -112,6 +112,18 @@ const CREATOR_CAMPAIGN_ACCESS = Object.freeze({
   ALL: 'all', // can apply to lite + exclusive
 });
 
+// --- Milestone-based campaign escrow (Point 12) ---
+// No separate "approved" state: like the original single-escrow flow
+// (approveWork releases immediately, it never persists CAMPAIGN_STATUS.
+// APPROVED as an intermediate step), approving a milestone releases its
+// funds in the same call — so SUBMITTED goes straight to RELEASED.
+const MILESTONE_STATUS = Object.freeze({
+  PENDING: 'pending', // created, brand hasn't funded it yet
+  FUNDED: 'funded', // brand paid into escrow, creator can start work
+  SUBMITTED: 'submitted', // creator submitted work, awaiting brand review
+  RELEASED: 'released', // funds released to creator (brand-approved or auto-released)
+});
+
 module.exports = {
   ROLES,
   SESSION_TYPES,
@@ -129,4 +141,5 @@ module.exports = {
   SUBSCRIPTION_STATUS,
   CAMPAIGN_VISIBILITY_TIER,
   CREATOR_CAMPAIGN_ACCESS,
+  MILESTONE_STATUS,
 };

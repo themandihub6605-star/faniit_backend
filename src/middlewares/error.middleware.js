@@ -35,6 +35,10 @@ function errorHandler(err, req, res, next) {
     success: false,
     message,
     errors: error.errors || [],
+    // Stable machine-readable code (e.g. 'PROPOSAL_QUOTA_EXCEEDED') for
+    // errors thrown as ApiError with one set — null for anything else
+    // (including the Mongoose/JWT conversions above, which don't set it).
+    errorCode: error.errorCode || null,
     ...(env.env === 'development' && { stack: err.stack }),
   });
 }

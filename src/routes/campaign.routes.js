@@ -13,6 +13,7 @@ const {
   publishCampaign,
   applyToCampaign,
   getMyProposals,
+  getSuggestedCampaigns,
   getApplications,
   decideApplication,
   toggleSaveCampaign,
@@ -36,6 +37,7 @@ const { ROLES } = require('../constants/enums');
 
 // specific static paths BEFORE the /:id catch-all
 router.get('/proposals/me', protect, authorize(ROLES.CREATOR), getMyProposals);
+router.get('/suggested/me', protect, authorize(ROLES.CREATOR), getSuggestedCampaigns);
 router.get('/saved/me', protect, getSavedCampaigns);
 
 router.get('/', listCampaigns);

@@ -1,9 +1,10 @@
 const { BrandProfile, Campaign, Transaction } = require('../models');
+const subscriptionService = require('../services/subscription.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const generateSlug = require('../utils/slugify');
-const { ROLES, TRANSACTION_TYPE, VERIFICATION_STATUS } = require('../constants/enums');
+const { ROLES, TRANSACTION_TYPE, VERIFICATION_STATUS, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
 
 const listBrands = catchAsync(async (req, res) => {
   const { industry, location, search, page = 1, limit = 20 } = req.query;
@@ -13,6 +14,19 @@ const listBrands = catchAsync(async (req, res) => {
   if (location) filter.location = new RegExp(location, 'i');
   if (search) {
     filter.$or = [{ companyName: new RegExp(search, 'i') }, { tagline: new RegExp(search, 'i') }];
+  }
+
+  // Tier-matched visibility (Point 5): a Lite creator only sees Lite
+  // brands; a Pro/Exclusive creator sees everyone (Lite + Pro/Elite).
+  // Only applied when the viewer is an authenticated creator — same
+  // reasoning and same caveat about optional-auth middleware as the
+  // mirror filter in creator.controller.js's listCreators.
+  if (req.user?.role === ROLES.CREATOR) {
+    const viewerIsLite = await subscriptionService.isViewerOnLiteTier(req.user._id, SUBSCRIPTION_APPLIES_TO.CREATOR);
+    if (viewerIsLite) {
+      const proBrandUserIds = await subscriptionService.getProTierUserIds(SUBSCRIPTION_APPLIES_TO.BRAND);
+      filter.user = { $nin: proBrandUserIds };
+    }
   }
 
   const [brands, total] = await Promise.all([

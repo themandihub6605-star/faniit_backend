@@ -1,7 +1,15 @@
 const razorpay = require('../config/razorpay');
 const { User, SubscriptionPlan, UserSubscription, Transaction } = require('../models');
 const ApiError = require('../utils/apiError');
-const { BILLING_CYCLE, SUBSCRIPTION_STATUS, TRANSACTION_TYPE, TRANSACTION_STATUS, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
+const {
+  BILLING_CYCLE,
+  SUBSCRIPTION_STATUS,
+  TRANSACTION_TYPE,
+  TRANSACTION_STATUS,
+  SUBSCRIPTION_APPLIES_TO,
+  CREATOR_CAMPAIGN_ACCESS,
+  CAMPAIGN_VISIBILITY_TIER,
+} = require('../constants/enums');
 
 function addCycle(date, billingCycle) {
   const d = new Date(date);
@@ -83,11 +91,16 @@ async function getOrCreateActiveSubscription(userId, appliesTo) {
   return sub;
 }
 
-/** Records one proposal against the creator's plan quota. If the quota is
- * exhausted, auto-charges the plan's per-extra-proposal fee from their
- * wallet — throws if their balance can't cover it (the proposal is not
- * sent in that case). */
-async function consumeCreatorProposal(userId) {
+/** Read-only check: does this creator have proposal quota left, or if
+ * not, can the extra-proposal fee be auto-charged from their wallet?
+ * Throws — without mutating anything — if they're blocked either way.
+ *
+ * Deliberately does NOT consume the quota or charge the wallet here.
+ * Call finalizeCreatorProposal() only after the Application document has
+ * actually been created, so a failure in between (validation error, DB
+ * hiccup) never leaves a charged wallet or a consumed quota slot with no
+ * proposal to show for it. */
+async function checkCreatorProposalQuota(userId) {
   const sub = await getOrCreateActiveSubscription(userId, SUBSCRIPTION_APPLIES_TO.CREATOR);
   const plan = sub.plan;
 
@@ -97,9 +110,27 @@ async function consumeCreatorProposal(userId) {
     const user = await User.findById(userId);
     if (user.walletBalance < plan.extraProposalCost) {
       throw ApiError.badRequest(
-        `You've used all ${plan.proposalLimit} proposals for this cycle. Extra proposals cost ₹${(plan.extraProposalCost / 100).toFixed(2)} — please add money to your wallet.`
+        `You've used all ${plan.proposalLimit} proposals for this cycle. Extra proposals cost ₹${(plan.extraProposalCost / 100).toFixed(2)} — please add money to your wallet.`,
+        [],
+        'PROPOSAL_QUOTA_EXCEEDED'
       );
     }
+    return { plan, needsExtraCharge: true };
+  }
+
+  return { plan, needsExtraCharge: false };
+}
+
+/** Call ONLY after the Application has been successfully created (and any
+ * campaign.applicantCount bump saved). Charges the extra-proposal fee if
+ * needed, then increments the usage counter. If this throws, the caller
+ * must roll back the Application/applicantCount it just created — the
+ * quota was never consumed, so nothing else needs undoing here. */
+async function finalizeCreatorProposal(userId, needsExtraCharge) {
+  const sub = await UserSubscription.findOne({ user: userId }).populate('plan');
+  const plan = sub.plan;
+
+  if (needsExtraCharge) {
     // Lazy require: wallet.service.js requires this file back (for
     // getCreatorPlanFields), so a top-level require here would create a
     // circular-dependency load order issue — requiring it inside the
@@ -119,23 +150,71 @@ async function consumeCreatorProposal(userId) {
   await sub.save();
 }
 
-/** Records one campaign post against the brand's plan quota — throws if
- * the quota is exhausted (no auto-pay path for campaigns; the brand must
- * upgrade). Call this at publish time, not draft-creation time. */
-async function consumeBrandCampaignSlot(userId) {
+/** Read-only check: does this brand have a campaign-post slot left this
+ * cycle? Throws — without mutating anything — if not (no auto-pay path
+ * for campaigns, the brand must upgrade). Returns the loaded
+ * subscription doc so the caller can pass it straight to
+ * finalizeBrandCampaignUsage() without a second DB round trip. */
+async function checkBrandCampaignQuota(userId) {
   const sub = await getOrCreateActiveSubscription(userId, SUBSCRIPTION_APPLIES_TO.BRAND);
   const plan = sub.plan;
 
   const withinLimit = plan.campaignPostLimit == null || sub.campaignsPostedThisCycle < plan.campaignPostLimit;
   if (!withinLimit) {
     throw ApiError.badRequest(
-      `You've reached your ${plan.name} plan's limit of ${plan.campaignPostLimit} campaign(s) for this ${plan.billingCycle === 'yearly' ? 'year' : 'month'}. Upgrade to post more.`
+      `You've reached your ${plan.name} plan's limit of ${plan.campaignPostLimit} campaign(s) for this ${plan.billingCycle === 'yearly' ? 'year' : 'month'}. Upgrade to post more.`,
+      [],
+      'CAMPAIGN_QUOTA_EXCEEDED'
     );
   }
 
+  return { sub, plan };
+}
+
+/** Call ONLY after the campaign has been saved with status OPEN and the
+ * brand's totalCampaigns bumped. Kept separate from the check above so a
+ * publish that fails partway through never consumes a slot the brand
+ * didn't actually get to use. */
+async function finalizeBrandCampaignUsage(sub) {
   sub.campaignsPostedThisCycle += 1;
   await sub.save();
-  return sub;
+}
+
+/** User ids (not profile ids — the `user` field both CreatorProfile and
+ * BrandProfile store) currently on a "sees everyone" tier: Pro/Exclusive
+ * for creators (campaignAccessTier: 'all'), Pro/Elite for brands
+ * (campaignVisibilityTier: 'exclusive'). Used to build a $nin filter for
+ * Lite-tier viewers — see isViewerOnLiteTier below and its callers in
+ * creator.controller.js / brand.controller.js.
+ *
+ * Deliberately computed as an exclusion set rather than an inclusion
+ * set: a profile with NO UserSubscription row yet (never triggered
+ * getOrCreateActiveSubscription) is implicitly on the free default —
+ * i.e. Lite — plan, exactly like one with an explicit Lite row. Trying
+ * to build the Lite-tier id list directly would miss those profiles;
+ * excluding the Pro-tier ids handles both cases correctly with one
+ * query, no need to enumerate every Lite subscriber. */
+async function getProTierUserIds(appliesTo) {
+  const isCreator = appliesTo === SUBSCRIPTION_APPLIES_TO.CREATOR;
+  const tierField = isCreator ? 'campaignAccessTier' : 'campaignVisibilityTier';
+  const proTierValue = isCreator ? CREATOR_CAMPAIGN_ACCESS.ALL : CAMPAIGN_VISIBILITY_TIER.EXCLUSIVE;
+
+  const proPlanIds = await SubscriptionPlan.find({ appliesTo, [tierField]: proTierValue }).distinct('_id');
+  return UserSubscription.find({ plan: { $in: proPlanIds } }).distinct('user');
+}
+
+/** Is this user (a creator or a brand — appliesTo says which) currently
+ * on the Lite/free tier for cross-visibility purposes? True for the
+ * free default plan AND for anyone with no subscription row yet (same
+ * "implicitly Lite" reasoning as getProTierUserIds above). Used to
+ * decide whether a listing needs the Lite-only visibility filter at
+ * all — a Pro/Exclusive viewer sees everyone, so no filter is applied
+ * for them. */
+async function isViewerOnLiteTier(userId, appliesTo) {
+  const plan = await (appliesTo === SUBSCRIPTION_APPLIES_TO.CREATOR ? getCreatorPlanFields(userId) : getBrandPlanFields(userId));
+  return appliesTo === SUBSCRIPTION_APPLIES_TO.CREATOR
+    ? plan.campaignAccessTier !== CREATOR_CAMPAIGN_ACCESS.ALL
+    : plan.campaignVisibilityTier !== CAMPAIGN_VISIBILITY_TIER.EXCLUSIVE;
 }
 
 async function getCreatorPlanFields(userId) {
@@ -150,9 +229,13 @@ async function getBrandPlanFields(userId) {
 
 module.exports = {
   ensureRazorpayPlan,
+  getProTierUserIds,
+  isViewerOnLiteTier,
   getOrCreateActiveSubscription,
-  consumeCreatorProposal,
-  consumeBrandCampaignSlot,
+  checkCreatorProposalQuota,
+  finalizeCreatorProposal,
+  checkBrandCampaignQuota,
+  finalizeBrandCampaignUsage,
   getCreatorPlanFields,
   getBrandPlanFields,
   addCycle,

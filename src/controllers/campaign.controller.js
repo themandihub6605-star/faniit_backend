@@ -3,6 +3,7 @@ const paymentService = require('../services/payment.service');
 const escrowService = require('../services/escrow.service');
 const notificationService = require('../services/notification.service');
 const subscriptionService = require('../services/subscription.service');
+const milestoneService = require('../services/milestone.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -80,13 +81,15 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
   if (campaign.status !== CAMPAIGN_STATUS.DRAFT) throw ApiError.conflict('Only draft campaigns can be edited this way');
 
-  // applicantLimit is only settable if the brand's active plan allows it —
-  // silently dropped (not an error) if they're not entitled to it, so the
-  // rest of the draft update still succeeds.
-  if (req.body.applicantLimit !== undefined) {
+  // applicantLimit / dailyApplicantLimit are only settable if the brand's
+  // active plan allows it — silently dropped (not an error) if they're
+  // not entitled to it, so the rest of the draft update still succeeds.
+  // One plan lookup covers both fields.
+  if (req.body.applicantLimit !== undefined || req.body.dailyApplicantLimit !== undefined) {
     const brandPlan = await subscriptionService.getBrandPlanFields(req.user._id);
     if (brandPlan.canSetApplicantLimit) {
-      campaign.applicantLimit = req.body.applicantLimit;
+      if (req.body.applicantLimit !== undefined) campaign.applicantLimit = req.body.applicantLimit;
+      if (req.body.dailyApplicantLimit !== undefined) campaign.dailyApplicantLimit = req.body.dailyApplicantLimit;
     }
   }
 
@@ -191,11 +194,15 @@ function assertPublishable(campaign) {
 }
 
 // --- Final step: go live. No fee — publishing itself is free. What DOES
-// happen here: (1) the brand's plan campaign-post quota is consumed
-// (throws if exhausted), (2) the campaign is stamped with the visibility
-// tier / featured flag / early-access cutoff that flow from their plan.
-// Escrow only comes into play later, when the brand accepts a creator's
-// bid (see initiateEscrowFunding/verifyEscrowPayment below). ---
+// happen here: (1) the brand's plan campaign-post quota is CHECKED
+// up front (throws early if exhausted, before any write happens), (2)
+// the campaign is stamped with the visibility tier / featured flag /
+// early-access cutoff that flow from their plan, (3) the quota slot is
+// only actually consumed (finalizeBrandCampaignUsage) after the campaign
+// and brand doc have both saved successfully — so a save failure midway
+// never burns a slot the brand didn't get. Escrow only comes into play
+// later, when the brand accepts a creator's bid (see
+// initiateEscrowFunding/verifyEscrowPayment below). ---
 const publishCampaign = catchAsync(async (req, res) => {
   const campaign = await Campaign.findById(req.params.id).populate('brand');
   if (!campaign) throw ApiError.notFound('Campaign not found');
@@ -204,8 +211,7 @@ const publishCampaign = catchAsync(async (req, res) => {
 
   assertPublishable(campaign);
 
-  await subscriptionService.consumeBrandCampaignSlot(req.user._id);
-  const brandPlan = await subscriptionService.getBrandPlanFields(req.user._id);
+  const { sub: brandSub, plan: brandPlan } = await subscriptionService.checkBrandCampaignQuota(req.user._id);
   const settings = await SiteSettings.getSingleton();
 
   campaign.status = CAMPAIGN_STATUS.OPEN;
@@ -218,14 +224,20 @@ const publishCampaign = catchAsync(async (req, res) => {
   campaign.brand.totalCampaigns += 1;
   await campaign.brand.save();
 
+  // Only consume the slot now that publish has fully succeeded.
+  await subscriptionService.finalizeBrandCampaignUsage(brandSub);
+
   return new ApiResponse(200, campaign, 'Campaign published').send(res);
 });
 
-// --- A creator applying consumes their plan's proposal quota (or
-// auto-charges the extra-proposal fee), and is gated by two subscription
-// checks before that even happens: exclusive-campaign access, and
-// early-access timing. Both throw a clear, actionable message rather than
-// a generic 403. ---
+// --- A creator applying is gated by two subscription checks up front
+// (exclusive-campaign access, early-access timing — unchanged), then the
+// proposal quota is CHECKED (read-only) before the Application is
+// created. The quota/wallet is only actually consumed
+// (finalizeCreatorProposal) after the Application and the campaign's
+// applicantCount have both saved — if that finalize step throws (e.g. a
+// wallet-debit race), the Application and applicantCount bump are rolled
+// back so nothing is left half-charged. ---
 const applyToCampaign = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can apply to campaigns');
 
@@ -249,13 +261,30 @@ const applyToCampaign = catchAsync(async (req, res) => {
     throw ApiError.conflict('This campaign has reached its applicant limit.');
   }
 
+  // Point 11: daily applicant cap (Pro/Exclusive brands only, set via
+  // updateDraftCampaign above). Computed dynamically against today's
+  // applications rather than a stored counter, so there's nothing to
+  // reset or drift — "today" is the server's local calendar day.
+  if (campaign.dailyApplicantLimit != null) {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const todaysApplicantCount = await Application.countDocuments({
+      campaign: campaign._id,
+      createdAt: { $gte: startOfToday },
+    });
+    if (todaysApplicantCount >= campaign.dailyApplicantLimit) {
+      throw ApiError.conflict("This campaign has reached today's applicant limit — please check back tomorrow.");
+    }
+  }
+
   const creator = await CreatorProfile.findOne({ user: req.user._id });
   if (!creator) throw ApiError.notFound('Creator profile not found');
 
   const existing = await Application.findOne({ campaign: campaign._id, creator: creator._id });
   if (existing) throw ApiError.conflict('You have already applied to this campaign');
 
-  await subscriptionService.consumeCreatorProposal(req.user._id);
+  // Check quota before creating anything — throws early with no cleanup needed.
+  const { needsExtraCharge } = await subscriptionService.checkCreatorProposalQuota(req.user._id);
 
   const application = await Application.create({
     campaign: campaign._id,
@@ -269,6 +298,18 @@ const applyToCampaign = catchAsync(async (req, res) => {
   campaign.applicantCount += 1;
   await campaign.save();
 
+  // Only now — application + count both confirmed saved — actually
+  // consume the quota / charge the extra-proposal fee. If this fails,
+  // roll back the application and count so nothing is left inconsistent.
+  try {
+    await subscriptionService.finalizeCreatorProposal(req.user._id, needsExtraCharge);
+  } catch (err) {
+    await Application.deleteOne({ _id: application._id });
+    campaign.applicantCount = Math.max(0, campaign.applicantCount - 1);
+    await campaign.save();
+    throw err;
+  }
+
   await notificationService.notify({
     userId: campaign.brand,
     type: 'proposal_received',
@@ -279,6 +320,83 @@ const applyToCampaign = catchAsync(async (req, res) => {
   });
 
   return new ApiResponse(201, application, 'Proposal sent').send(res);
+});
+
+// --- Point 8: rule-based "AI-suggested" campaigns for Pro/Exclusive
+// creators only. No LLM call — this scores each open, not-yet-applied
+// campaign against the creator's own profile (category, location,
+// skills) and returns the top matches. Hard filters (follower minimum,
+// applicant limit, early-access timing) exclude a campaign entirely;
+// the score below only ranks what's left. ---
+const getSuggestedCampaigns = catchAsync(async (req, res) => {
+  const creatorPlan = await subscriptionService.getCreatorPlanFields(req.user._id);
+  if (creatorPlan.campaignAccessTier !== CREATOR_CAMPAIGN_ACCESS.ALL) {
+    throw ApiError.forbidden(
+      'AI-suggested campaigns are a Pro feature — upgrade your plan to unlock personalized matches.',
+      [],
+      'PRO_FEATURE_LOCKED'
+    );
+  }
+
+  const creator = await CreatorProfile.findOne({ user: req.user._id }).populate('category', 'label icon');
+  if (!creator) throw ApiError.notFound('Creator profile not found');
+
+  const appliedCampaignIds = await Application.find({ creator: creator._id }).distinct('campaign');
+
+  // Hard filters, applied as a DB query (not post-fetch) so pagination-free
+  // scoring below only ever runs over campaigns the creator could actually apply to.
+  const candidateFilter = {
+    status: CAMPAIGN_STATUS.OPEN,
+    _id: { $nin: appliedCampaignIds },
+    $or: [{ minFollowers: null }, { minFollowers: { $lte: creator.followerCount || 0 } }],
+  };
+  if (!creatorPlan.hasEarlyAccess) {
+    candidateFilter.$and = [{ $or: [{ publicVisibleAt: null }, { publicVisibleAt: { $lte: new Date() } }] }];
+  }
+
+  const candidates = await Campaign.find(candidateFilter)
+    .populate({ path: 'brand', populate: { path: 'user', select: 'name avatarUrl' } })
+    .populate('category', 'label icon')
+    .sort({ createdAt: -1 })
+    .limit(200); // cap the scoring pool so this stays fast even with many open campaigns
+
+  const creatorSkills = (creator.skills || []).map((s) => s.toLowerCase());
+  const creatorLocation = (creator.location || '').toLowerCase();
+
+  const scored = candidates
+    .filter((c) => c.applicantLimit == null || c.applicantCount < c.applicantLimit)
+    .map((c) => {
+      let score = 0;
+      const reasons = [];
+
+      if (creator.category && c.category && String(c.category._id) === String(creator.category._id)) {
+        score += 40;
+        reasons.push(`Matches your category (${c.category.label})`);
+      }
+
+      if (c.locationType === LOCATION_TYPE.PAN_INDIA) {
+        score += 10;
+      } else if (creatorLocation && c.location && c.location.toLowerCase().includes(creatorLocation)) {
+        score += 20;
+        reasons.push('Matches your location');
+      }
+
+      const matchedSkills = (c.influencerCategories || []).filter((tag) => creatorSkills.includes(tag.toLowerCase()));
+      if (matchedSkills.length > 0) {
+        score += Math.min(20, matchedSkills.length * 5);
+        reasons.push(`Matches ${matchedSkills.length} of your skill${matchedSkills.length === 1 ? '' : 's'}`);
+      }
+
+      if (c.minFollowers != null) {
+        reasons.push('You meet the follower requirement');
+      }
+
+      return { campaign: c, matchScore: score, matchReasons: reasons };
+    })
+    .sort((a, b) => b.matchScore - a.matchScore || new Date(b.campaign.createdAt) - new Date(a.campaign.createdAt))
+    .slice(0, 10);
+
+  return new ApiResponse(200, scored, 'Suggested campaigns fetched').send(res);
 });
 
 const getMyProposals = catchAsync(async (req, res) => {
@@ -340,6 +458,13 @@ const decideApplication = catchAsync(async (req, res) => {
   if (decision === 'accepted') {
     campaign.assignedCreator = application.creator;
     await campaign.save();
+
+    // Point 12: milestone-based escrow only applies to paid campaigns —
+    // a barter campaign has no cash budget to split into an
+    // advance/final payment, so there's nothing to create here.
+    if (campaign.campaignType === CAMPAIGN_TYPE.PAID && campaign.budget > 0) {
+      await milestoneService.createInitialMilestones(campaign);
+    }
   }
 
   await notificationService.notify({
@@ -457,6 +582,7 @@ const approveWork = catchAsync(async (req, res) => {
 
 module.exports = {
   listCampaigns,
+  getSuggestedCampaigns,
   getCampaignById,
   getMyDraftCampaign,
   createDraftCampaign,

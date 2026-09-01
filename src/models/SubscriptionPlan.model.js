@@ -15,6 +15,17 @@ const subscriptionPlanSchema = new mongoose.Schema(
     price: { type: Number, required: true, default: 0 }, // in paise; 0 = free plan
     billingCycle: { type: String, enum: Object.values(BILLING_CYCLE), required: true },
 
+    // Links this plan to its monthly/yearly sibling so the pricing page
+    // can offer a single Monthly/Yearly toggle per tier instead of
+    // listing every billing cycle as its own card. Two plan rows with
+    // the same billingGroupSlug (and different billingCycle) are treated
+    // as the same tier at two price points — e.g. "creator-pro" for both
+    // "Creator Pro Monthly" and "Creator Pro Yearly". Leave blank for a
+    // plan that only ever has one cycle (e.g. the free default) — it
+    // then falls back to its own slug and always shows regardless of
+    // the toggle.
+    billingGroupSlug: { type: String, default: '', trim: true, lowercase: true },
+
     isDefault: { type: Boolean, default: false }, // exactly one default plan per appliesTo — new signups start here
     isActive: { type: Boolean, default: true }, // admin can retire a plan without deleting it
     sortOrder: { type: Number, default: 0 }, // display order on the pricing page
@@ -43,5 +54,6 @@ const subscriptionPlanSchema = new mongoose.Schema(
 );
 
 subscriptionPlanSchema.index({ appliesTo: 1, isActive: 1 });
+subscriptionPlanSchema.index({ billingGroupSlug: 1 });
 
 module.exports = mongoose.model('SubscriptionPlan', subscriptionPlanSchema);

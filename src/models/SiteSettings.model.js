@@ -23,6 +23,18 @@ const siteSettingsSchema = new mongoose.Schema(
     // wait after a campaign is published before they're allowed to apply.
     // Pro creators (plan.hasEarlyAccess) skip this wait entirely.
     creatorEarlyAccessHours: { type: Number, default: 6, min: 0 },
+
+    // --- Milestone-based campaign escrow (Point 12) ---
+    // What percentage of a campaign's budget becomes the advance milestone
+    // the moment a brand accepts a creator (milestone.service.js
+    // createInitialMilestones). The remaining (100 - this)% becomes the
+    // single final-delivery milestone.
+    campaignAdvancePercent: { type: Number, default: 20, min: 0, max: 100 },
+    // How many days after a creator submits a milestone before it
+    // auto-releases if the brand never reviews it. 0 disables auto-release
+    // entirely (a submitted milestone then waits indefinitely for the
+    // brand, same as the original single-escrow flow's behavior).
+    milestoneAutoReleaseDays: { type: Number, default: 7, min: 0 },
   },
   { timestamps: true, _id: false }
 );

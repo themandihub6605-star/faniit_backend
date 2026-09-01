@@ -9,9 +9,11 @@ const {
   getMyDashboard,
   followCreator,
 } = require('../controllers/creator.controller');
-const { protect } = require('../middlewares/auth.middleware');
+const { protect, optionalAuth } = require('../middlewares/auth.middleware');
 
-router.get('/', listCreators);
+// optionalAuth so tier-matched visibility (Point 5) can see who's asking
+// — without requiring login, since this listing stays public either way.
+router.get('/', optionalAuth, listCreators);
 router.get('/me', protect, getMyProfile);
 router.get('/me/dashboard', protect, getMyDashboard);
 router.patch('/me', protect, updateMyProfile);

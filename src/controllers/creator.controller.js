@@ -1,8 +1,9 @@
 const { CreatorProfile, Session, Booking, Transaction, Review } = require('../models');
+const subscriptionService = require('../services/subscription.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/enums');
+const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
 const { VERIFICATION_STATUS } = require('../constants/enums');
 const listCreators = catchAsync(async (req, res) => {
   const { category, location, minFollowers, search, page = 1, limit = 20 } = req.query;
@@ -13,6 +14,22 @@ const listCreators = catchAsync(async (req, res) => {
   if (minFollowers) filter.followerCount = { $gte: Number(minFollowers) };
   if (search) {
     filter.$or = [{ bio: new RegExp(search, 'i') }];
+  }
+
+  // Tier-matched visibility (Point 5): a Lite brand only sees Lite
+  // creators; a Pro/Elite brand sees everyone (Lite + Pro/Exclusive).
+  // Only applied when the viewer is an authenticated brand — anonymous
+  // visitors, creators browsing other creators, and admins see the
+  // unfiltered list. req.user is populated by optional-auth middleware
+  // when a valid token is present, even on this public route; if that
+  // middleware isn't wired on this route yet, req.user will always be
+  // undefined here and this filter silently never activates.
+  if (req.user?.role === ROLES.BRAND) {
+    const viewerIsLite = await subscriptionService.isViewerOnLiteTier(req.user._id, SUBSCRIPTION_APPLIES_TO.BRAND);
+    if (viewerIsLite) {
+      const proCreatorUserIds = await subscriptionService.getProTierUserIds(SUBSCRIPTION_APPLIES_TO.CREATOR);
+      filter.user = { $nin: proCreatorUserIds };
+    }
   }
 
   const creators = await CreatorProfile.find(filter)

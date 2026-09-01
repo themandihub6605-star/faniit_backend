@@ -17,7 +17,11 @@ const transactionSchema = new mongoose.Schema(
     netAmount: { type: Number, default: 0 }, // amount actually credited to `to`
 
     // polymorphic reference to whatever this transaction is for
-    relatedModel: { type: String, enum: ['Booking', 'Campaign', 'Session'], default: null },
+    // 'Milestone' added for Point 12 — a milestone-level escrow deposit or
+    // payout points here instead of straight at 'Campaign', so multiple
+    // transactions (advance + final) can be traced back to their own
+    // milestone rather than colliding on one Campaign relatedId.
+    relatedModel: { type: String, enum: ['Booking', 'Campaign', 'Session', 'Milestone'], default: null },
     relatedId: { type: mongoose.Schema.Types.ObjectId, default: null },
 
     // Razorpay references
