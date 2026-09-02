@@ -250,7 +250,7 @@ const applyToCampaign = catchAsync(async (req, res) => {
   const creatorPlan = await subscriptionService.getCreatorPlanFields(req.user._id);
 
   if (campaign.visibilityTier === CAMPAIGN_VISIBILITY_TIER.EXCLUSIVE && creatorPlan.campaignAccessTier !== CREATOR_CAMPAIGN_ACCESS.ALL) {
-    throw ApiError.forbidden('This is an exclusive campaign for Pro creators. Upgrade your plan to apply.');
+    throw ApiError.forbidden('This is an exclusive campaign for Pro creators. Upgrade your plan to apply.', [], 'EXCLUSIVE_CAMPAIGN_LOCKED');
   }
 
   if (!creatorPlan.hasEarlyAccess && campaign.publicVisibleAt && new Date() < campaign.publicVisibleAt) {
