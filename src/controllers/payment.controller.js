@@ -39,15 +39,48 @@ const handleWebhook = catchAsync(async (req, res) => {
       // This is the authoritative moment to roll the billing period
       // forward and reset that period's usage counters.
       const rzpSubId = payload.subscription.entity.id;
-      const sub = await UserSubscription.findOne({ razorpaySubscriptionId: rzpSubId }).populate('plan');
-      if (sub) {
-        sub.status = SUBSCRIPTION_STATUS.ACTIVE;
-        sub.currentPeriodStart = new Date();
-        sub.currentPeriodEnd = subscriptionService.addCycle(new Date(), sub.plan.billingCycle);
-        sub.proposalsUsedThisCycle = 0;
-        sub.campaignsPostedThisCycle = 0;
-        await sub.save();
+      let sub = await UserSubscription.findOne({ razorpaySubscriptionId: rzpSubId }).populate('plan');
+
+      if (!sub) {
+        // BUG FIX: the client-side verifyCheckout call never ran for this
+        // subscription (tab closed / network dropped / app crashed right
+        // after Razorpay checkout succeeded) — so no UserSubscription row
+        // was ever linked to this razorpaySubscriptionId. Previously this
+        // branch just fell through and did nothing, silently leaving the
+        // user's plan un-upgraded forever even though Razorpay had
+        // charged them successfully. Recover using the userId/planId we
+        // set as `notes` when the subscription was created (see
+        // subscription.controller.js's createCheckout) — this webhook is
+        // the only remaining place that knows this payment happened, so
+        // it has to be able to create/link the subscription itself.
+        const { userId, planId } = payload.subscription.entity.notes || {};
+
+        if (!userId || !planId) {
+          // Nothing to recover from — no existing link and no notes to
+          // fall back to. Log loudly for manual reconciliation rather
+          // than silently dropping a real payment on the floor.
+          console.error(
+            `[webhook] subscription.charged for unknown subscription ${rzpSubId} with no notes to recover from — manual reconciliation needed`
+          );
+          break;
+        }
+
+        sub = await UserSubscription.findOne({ user: userId });
+        if (!sub) {
+          sub = new UserSubscription({ user: userId });
+        }
+        sub.plan = planId;
+        sub.razorpaySubscriptionId = rzpSubId;
+        sub.cancelAtPeriodEnd = false;
+        sub = await sub.populate('plan');
       }
+
+      sub.status = SUBSCRIPTION_STATUS.ACTIVE;
+      sub.currentPeriodStart = new Date();
+      sub.currentPeriodEnd = subscriptionService.addCycle(new Date(), sub.plan.billingCycle);
+      sub.proposalsUsedThisCycle = 0;
+      sub.campaignsPostedThisCycle = 0;
+      await sub.save();
       break;
     }
     case 'subscription.halted': {

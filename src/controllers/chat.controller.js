@@ -1,9 +1,32 @@
 const { Conversation, Message, BrandProfile } = require('../models');
 const notificationService = require('../services/notification.service');
+const subscriptionService = require('../services/subscription.service');
 const { getIO } = require('../config/socket');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
+const { ROLES, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
+
+/** Messaging is Pro-only for creators and brands — a Lite creator/brand
+ * cannot start a conversation or send a message, to anyone, regardless of
+ * the other side's plan. Fans, agencies, and admins aren't gated (they
+ * have no subscription plan to check). Throws with a stable errorCode so
+ * the frontend can catch this specifically and show an upgrade prompt
+ * instead of a generic error. This is a defense-in-depth check — the
+ * primary UX gate lives on the frontend "Message" button itself, before
+ * it even navigates here. */
+async function assertCanMessage(user) {
+  if (user.role !== ROLES.CREATOR && user.role !== ROLES.BRAND) return;
+
+  const plan =
+    user.role === ROLES.CREATOR
+      ? await subscriptionService.getCreatorPlanFields(user._id)
+      : await subscriptionService.getBrandPlanFields(user._id);
+
+  if (plan.price === 0) {
+    throw ApiError.forbidden('Messaging is a Pro feature — upgrade your plan to message others.', [], 'MESSAGING_PRO_ONLY');
+  }
+}
 
 /** Chat should always show a *public identity* — a brand's company name and
  * logo, never the personal name/photo they signed up with (which is often
@@ -43,6 +66,8 @@ const listConversations = catchAsync(async (req, res) => {
 });
 
 const startConversation = catchAsync(async (req, res) => {
+  await assertCanMessage(req.user);
+
   const { userId } = req.body;
   if (!userId) throw ApiError.badRequest('userId is required');
   if (userId === String(req.user._id)) throw ApiError.badRequest('You cannot message yourself');
@@ -84,6 +109,8 @@ const getMessages = catchAsync(async (req, res) => {
 });
 
 const sendMessage = catchAsync(async (req, res) => {
+  await assertCanMessage(req.user);
+
   const { text } = req.body;
   if (!text?.trim()) throw ApiError.badRequest('Message text is required');
 
@@ -127,4 +154,4 @@ const sendMessage = catchAsync(async (req, res) => {
   return new ApiResponse(201, message, 'Message sent').send(res);
 });
 
-module.exports = { listConversations, startConversation, getMessages, sendMessage };
+module.exports = { listConversations, startConversation, getMessages, sendMessage, assertCanMessage };

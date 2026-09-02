@@ -1,10 +1,9 @@
-const { BrandProfile, Campaign, Transaction } = require('../models');
-const subscriptionService = require('../services/subscription.service');
+const { BrandProfile, Campaign, Transaction, UserSubscription } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const generateSlug = require('../utils/slugify');
-const { ROLES, TRANSACTION_TYPE, VERIFICATION_STATUS, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
+const { ROLES, TRANSACTION_TYPE, VERIFICATION_STATUS } = require('../constants/enums');
 
 const listBrands = catchAsync(async (req, res) => {
   const { industry, location, search, page = 1, limit = 20 } = req.query;
@@ -16,18 +15,9 @@ const listBrands = catchAsync(async (req, res) => {
     filter.$or = [{ companyName: new RegExp(search, 'i') }, { tagline: new RegExp(search, 'i') }];
   }
 
-  // Tier-matched visibility (Point 5): a Lite creator only sees Lite
-  // brands; a Pro/Exclusive creator sees everyone (Lite + Pro/Elite).
-  // Only applied when the viewer is an authenticated creator — same
-  // reasoning and same caveat about optional-auth middleware as the
-  // mirror filter in creator.controller.js's listCreators.
-  if (req.user?.role === ROLES.CREATOR) {
-    const viewerIsLite = await subscriptionService.isViewerOnLiteTier(req.user._id, SUBSCRIPTION_APPLIES_TO.CREATOR);
-    if (viewerIsLite) {
-      const proBrandUserIds = await subscriptionService.getProTierUserIds(SUBSCRIPTION_APPLIES_TO.BRAND);
-      filter.user = { $nin: proBrandUserIds };
-    }
-  }
+  // NOTE: the earlier Lite-only-sees-Lite / Pro-sees-everyone visibility
+  // filter (Point 5) has been removed per later instruction — every
+  // brand is now visible to every viewer regardless of plan tier.
 
   const [brands, total] = await Promise.all([
     BrandProfile.find(filter)
@@ -38,7 +28,24 @@ const listBrands = catchAsync(async (req, res) => {
     BrandProfile.countDocuments(filter),
   ]);
 
-  return new ApiResponse(200, { brands, total, page: Number(page), limit: Number(limit) }, 'Brands fetched').send(res);
+  // Plan badge info (replaces the old blue verified-tick on listing
+  // cards) — one batched query for every brand on this page rather than
+  // a per-card lookup. A brand with no UserSubscription row yet is
+  // implicitly on the free default plan — defaults to 'Lite' / not-pro.
+  const userIds = brands.map((b) => b.user?._id).filter(Boolean);
+  const subs = await UserSubscription.find({ user: { $in: userIds } }).populate('plan', 'name price');
+  const planMap = new Map(subs.map((s) => [String(s.user), s.plan]));
+
+  const brandsWithPlan = brands.map((b) => {
+    const plan = planMap.get(String(b.user?._id));
+    return {
+      ...b.toObject(),
+      planName: plan ? plan.name : 'Lite',
+      isProPlan: plan ? plan.price > 0 : false,
+    };
+  });
+
+  return new ApiResponse(200, { brands: brandsWithPlan, total, page: Number(page), limit: Number(limit) }, 'Brands fetched').send(res);
 });
 
 const uploadLogo = catchAsync(async (req, res) => {
@@ -71,7 +78,18 @@ const getBrandBySlug = catchAsync(async (req, res) => {
   const campaignsPosted = await Campaign.countDocuments({ brand: brand._id });
   const campaigns = await Campaign.find({ brand: brand._id, status: 'open' }).sort({ createdAt: -1 }).limit(6);
 
-  return new ApiResponse(200, { brand, campaigns, stats: { campaignsPosted } }, 'Brand profile fetched').send(res);
+  // Plan badge info for this profile — same defaulting as listBrands (no
+  // UserSubscription row yet = implicitly Lite). Used by the frontend to
+  // show a Lite viewer an upgrade prompt when they open a Pro brand's
+  // profile.
+  const sub = await UserSubscription.findOne({ user: brand.user._id }).populate('plan', 'name price');
+  const brandWithPlan = {
+    ...brand.toObject(),
+    planName: sub ? sub.plan.name : 'Lite',
+    isProPlan: sub ? sub.plan.price > 0 : false,
+  };
+
+  return new ApiResponse(200, { brand: brandWithPlan, campaigns, stats: { campaignsPosted } }, 'Brand profile fetched').send(res);
 });
 
 const getMyProfile = catchAsync(async (req, res) => {

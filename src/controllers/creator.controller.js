@@ -1,9 +1,8 @@
-const { CreatorProfile, Session, Booking, Transaction, Review } = require('../models');
-const subscriptionService = require('../services/subscription.service');
+const { CreatorProfile, Session, Booking, Transaction, Review, UserSubscription } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
+const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/enums');
 const { VERIFICATION_STATUS } = require('../constants/enums');
 const listCreators = catchAsync(async (req, res) => {
   const { category, location, minFollowers, search, page = 1, limit = 20 } = req.query;
@@ -16,21 +15,11 @@ const listCreators = catchAsync(async (req, res) => {
     filter.$or = [{ bio: new RegExp(search, 'i') }];
   }
 
-  // Tier-matched visibility (Point 5): a Lite brand only sees Lite
-  // creators; a Pro/Elite brand sees everyone (Lite + Pro/Exclusive).
-  // Only applied when the viewer is an authenticated brand — anonymous
-  // visitors, creators browsing other creators, and admins see the
-  // unfiltered list. req.user is populated by optional-auth middleware
-  // when a valid token is present, even on this public route; if that
-  // middleware isn't wired on this route yet, req.user will always be
-  // undefined here and this filter silently never activates.
-  if (req.user?.role === ROLES.BRAND) {
-    const viewerIsLite = await subscriptionService.isViewerOnLiteTier(req.user._id, SUBSCRIPTION_APPLIES_TO.BRAND);
-    if (viewerIsLite) {
-      const proCreatorUserIds = await subscriptionService.getProTierUserIds(SUBSCRIPTION_APPLIES_TO.CREATOR);
-      filter.user = { $nin: proCreatorUserIds };
-    }
-  }
+  // NOTE: the earlier Lite-only-sees-Lite / Pro-sees-everyone visibility
+  // filter (Point 5) has been removed per later instruction — every
+  // creator is now visible to every viewer regardless of plan tier.
+  // subscriptionService.getProTierUserIds / isViewerOnLiteTier still exist
+  // and are harmless if unused elsewhere; nothing to clean up there.
 
   const creators = await CreatorProfile.find(filter)
     .populate('user', 'name avatarUrl')
@@ -47,10 +36,25 @@ const listCreators = catchAsync(async (req, res) => {
     { $group: { _id: '$creator', count: { $sum: 1 } } },
   ]);
   const countMap = new Map(completedCounts.map((c) => [String(c._id), c.count]));
-  const creatorsWithStats = creators.map((c) => ({
-    ...c.toObject(),
-    projectsCompletedCount: countMap.get(String(c._id)) || 0,
-  }));
+
+  // Plan badge info (replaces the old blue verified-tick on listing
+  // cards) — one batched query for every creator on this page rather
+  // than a per-card lookup. A creator with no UserSubscription row yet
+  // is implicitly on the free default plan, same reasoning as elsewhere
+  // in subscription.service.js — defaults to 'Lite' / not-pro.
+  const userIds = creators.map((c) => c.user?._id).filter(Boolean);
+  const subs = await UserSubscription.find({ user: { $in: userIds } }).populate('plan', 'name price');
+  const planMap = new Map(subs.map((s) => [String(s.user), s.plan]));
+
+  const creatorsWithStats = creators.map((c) => {
+    const plan = planMap.get(String(c.user?._id));
+    return {
+      ...c.toObject(),
+      projectsCompletedCount: countMap.get(String(c._id)) || 0,
+      planName: plan ? plan.name : 'Lite',
+      isProPlan: plan ? plan.price > 0 : false,
+    };
+  });
 
   const total = await CreatorProfile.countDocuments(filter);
 
@@ -74,9 +78,20 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
   // Real, computed trust metrics — not hardcoded.
   const projectsCompletedCount = await Session.countDocuments({ creator: creator._id, isCompleted: true });
 
+  // Plan badge info for this profile — same defaulting as listCreators
+  // (no UserSubscription row yet = implicitly Lite). Used by the
+  // frontend to show a Lite viewer an upgrade prompt when they open a
+  // Pro creator's profile.
+  const sub = await UserSubscription.findOne({ user: creator.user._id }).populate('plan', 'name price');
+  const creatorWithPlan = {
+    ...creator.toObject(),
+    planName: sub ? sub.plan.name : 'Lite',
+    isProPlan: sub ? sub.plan.price > 0 : false,
+  };
+
   return new ApiResponse(
     200,
-    { creator, sessions, reviews, stats: { projectsCompletedCount } },
+    { creator: creatorWithPlan, sessions, reviews, stats: { projectsCompletedCount } },
     'Creator profile fetched'
   ).send(res);
 });
