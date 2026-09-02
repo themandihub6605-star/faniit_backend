@@ -23,4 +23,5 @@ module.exports = {
   SiteSettings: require('./SiteSettings.model'),
   SubscriptionPlan: require('./SubscriptionPlan.model'),
   UserSubscription: require('./UserSubscription.model'),
+  Milestone: require('./Milestone'),
 };
