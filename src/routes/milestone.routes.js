@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 
 const {
-  getMilestonesForCampaign,
   initiateMilestoneFunding,
   verifyMilestonePayment,
   submitMilestone,
@@ -12,17 +11,16 @@ const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
 const { ROLES } = require('../constants/enums');
 
-// Mount this router at /api/campaigns/:campaignId/milestones for the list
-// route, and /api/milestones for everything else — see the mounting note
-// below. If your app.js only supports one mount point per router file,
-// split this into two small router files instead; noted in the delivery
-// message since I can't see app.js/index.js to confirm your convention.
+// Mounted at /api/milestones in routes/index.js (router.use('/milestones',
+// require('./milestone.routes'))) — paths below are relative to that
+// prefix, matching every other route file's convention. The one milestone
+// route that lists a campaign's milestones lives in campaign.routes.js
+// instead (GET /api/campaigns/:id/milestones), since it's scoped by
+// campaign rather than by milestone id.
 
-router.get('/campaigns/:campaignId/milestones', protect, getMilestonesForCampaign);
-
-router.post('/milestones/:id/fund', protect, authorize(ROLES.BRAND), initiateMilestoneFunding);
-router.post('/milestones/:id/verify-payment', protect, authorize(ROLES.BRAND), verifyMilestonePayment);
-router.patch('/milestones/:id/submit', protect, authorize(ROLES.CREATOR), submitMilestone);
-router.patch('/milestones/:id/approve', protect, authorize(ROLES.BRAND), approveMilestone);
+router.post('/:id/fund', protect, authorize(ROLES.BRAND), initiateMilestoneFunding);
+router.post('/:id/verify-payment', protect, authorize(ROLES.BRAND), verifyMilestonePayment);
+router.patch('/:id/submit', protect, authorize(ROLES.CREATOR), submitMilestone);
+router.patch('/:id/approve', protect, authorize(ROLES.BRAND), approveMilestone);
 
 module.exports = router;

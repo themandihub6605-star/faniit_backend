@@ -33,6 +33,7 @@ const {
   addProductSchema,
   applyCampaignSchema,
 } = require('../validators/campaign.validator');
+const { getMilestonesForCampaign } = require('../controllers/milestone.controller');
 const { ROLES } = require('../constants/enums');
 
 // specific static paths BEFORE the /:id catch-all
@@ -79,6 +80,10 @@ router.post('/:id/verify-escrow-payment', protect, authorize(ROLES.BRAND), verif
 
 router.patch('/:id/submit', protect, authorize(ROLES.CREATOR), submitWork);
 router.patch('/:id/approve', protect, authorize(ROLES.BRAND), approveWork);
+
+// Point 12: list a campaign's payment milestones — either the brand
+// owner or the assigned creator (checked inside the controller).
+router.get('/:id/milestones', protect, getMilestonesForCampaign);
 
 // generic :id GET must come after the specific static GET routes above
 router.get('/:id', getCampaignById);

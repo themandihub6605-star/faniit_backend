@@ -8,7 +8,7 @@ const ApiError = require('../utils/apiError');
 // GET /campaigns/:campaignId/milestones — either the brand that owns the
 // campaign or the creator assigned to it can view its milestones.
 const getMilestonesForCampaign = catchAsync(async (req, res) => {
-  const campaign = await Campaign.findById(req.params.campaignId).populate('brand').populate('assignedCreator');
+  const campaign = await Campaign.findById(req.params.id).populate('brand').populate('assignedCreator');
   if (!campaign) throw ApiError.notFound('Campaign not found');
 
   const isBrandOwner = campaign.brand.user.equals(req.user._id);
