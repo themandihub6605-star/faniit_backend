@@ -93,6 +93,14 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
     }
   }
 
+  // Upwork-style flow: how many equal milestones the budget splits into
+  // (1-4). Clamped rather than rejected outright — a stray value like 0
+  // or 7 just gets pulled back into range instead of failing the whole
+  // draft update.
+  if (req.body.milestoneCount !== undefined) {
+    campaign.milestoneCount = Math.min(4, Math.max(1, Number(req.body.milestoneCount) || 2));
+  }
+
   const editableFields = [
     'title',
     'campaignType',

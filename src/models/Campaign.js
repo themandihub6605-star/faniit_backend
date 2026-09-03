@@ -78,6 +78,12 @@ const campaignSchema = new mongoose.Schema(
     // there's nothing here to drift out of sync.
     dailyApplicantLimit: { type: Number, default: null },
 
+    // Upwork-style milestone flow: how many equal milestones the budget
+    // splits into once a creator is accepted (1-4, brand's choice at
+    // creation time — see PostCampaign.tsx). Replaces the earlier fixed
+    // 20%-advance/80%-final split. Only meaningful for paid campaigns.
+    milestoneCount: { type: Number, default: 2, min: 1, max: 4 },
+
     assignedCreator: { type: mongoose.Schema.Types.ObjectId, ref: 'CreatorProfile', default: null },
 
     escrowTransaction: { type: mongoose.Schema.Types.ObjectId, ref: 'Transaction', default: null },

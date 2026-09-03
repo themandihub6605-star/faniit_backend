@@ -112,16 +112,34 @@ const CREATOR_CAMPAIGN_ACCESS = Object.freeze({
   ALL: 'all', // can apply to lite + exclusive
 });
 
-// --- Milestone-based campaign escrow (Point 12) ---
-// No separate "approved" state: like the original single-escrow flow
-// (approveWork releases immediately, it never persists CAMPAIGN_STATUS.
-// APPROVED as an intermediate step), approving a milestone releases its
-// funds in the same call — so SUBMITTED goes straight to RELEASED.
+// --- Milestone-based campaign escrow (Point 12, Upwork-style flow) ---
+// pending -> funded -> submitted -> released
+//                         |            ^
+//                         v            |
+//                  changes_requested --+ (creator resubmits -> submitted)
+//                         |
+//                         v (brand raises dispute instead)
+//                     disputed -> released (admin resolves: full/partial/refund)
+//                              -> funded (admin resolves: revision_required)
 const MILESTONE_STATUS = Object.freeze({
   PENDING: 'pending', // created, brand hasn't funded it yet
   FUNDED: 'funded', // brand paid into escrow, creator can start work
   SUBMITTED: 'submitted', // creator submitted work, awaiting brand review
-  RELEASED: 'released', // funds released to creator (brand-approved or auto-released)
+  CHANGES_REQUESTED: 'changes_requested', // brand asked for a revision, no money moved
+  DISPUTED: 'disputed', // brand raised a dispute, awaiting admin resolution
+  RELEASED: 'released', // funds released to creator (approved, auto-released, or dispute-resolved)
+});
+
+const DISPUTE_STATUS = Object.freeze({
+  OPEN: 'open',
+  RESOLVED: 'resolved',
+});
+
+const DISPUTE_OUTCOME = Object.freeze({
+  FULL_TO_CREATOR: 'full_to_creator',
+  PARTIAL: 'partial',
+  REFUND_TO_BRAND: 'refund_to_brand',
+  REVISION_REQUIRED: 'revision_required', // no money moves — milestone goes back to 'funded'
 });
 
 module.exports = {
@@ -142,4 +160,6 @@ module.exports = {
   CAMPAIGN_VISIBILITY_TIER,
   CREATOR_CAMPAIGN_ACCESS,
   MILESTONE_STATUS,
+  DISPUTE_STATUS,
+  DISPUTE_OUTCOME,
 };

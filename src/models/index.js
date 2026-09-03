@@ -24,4 +24,5 @@ module.exports = {
   SubscriptionPlan: require('./SubscriptionPlan.model'),
   UserSubscription: require('./UserSubscription.model'),
   Milestone: require('./Milestone'),
+  Dispute: require('./Dispute'),
 };
