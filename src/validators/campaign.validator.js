@@ -42,6 +42,16 @@ const updateDraftCampaignSchema = z.object({
   // — enforcement of that permission happens at publish time in the
   // controller, this schema only validates the shape of the value itself.
   applicantLimit: z.number().min(1).nullable().optional(),
+  // Point 11: same reasoning as applicantLimit above — daily cap, only
+  // actually applied server-side if the brand's plan allows it. Was
+  // missing from this schema entirely, which silently stripped it from
+  // every request before it ever reached the controller.
+  dailyApplicantLimit: z.number().min(1).nullable().optional(),
+  // Point 12 (Upwork-style milestones): how many equal milestones the
+  // budget splits into (1-4), and the brand's optional custom name for
+  // each one. Also missing from this schema — same silent-strip bug.
+  milestoneCount: z.number().min(1).max(4).optional(),
+  milestoneTitles: z.array(z.string().max(60)).max(4).optional(),
 });
 
 const addProductSchema = z.object({

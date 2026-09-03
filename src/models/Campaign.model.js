@@ -69,6 +69,25 @@ const campaignSchema = new mongoose.Schema(
     // Optional cap on total applicants — only settable by brands whose plan
     // allows it (SubscriptionPlan.canSetApplicantLimit).
     applicantLimit: { type: Number, default: null },
+    // Point 11: optional cap on applicants PER CALENDAR DAY — same
+    // canSetApplicantLimit gate as applicantLimit above (Pro/Exclusive
+    // brands only). Lets a brand avoid a sudden flood of applications
+    // overwhelming their ability to review profiles, independent of the
+    // overall applicantLimit. Not a stored running counter — checked
+    // dynamically against Application.createdAt in applyToCampaign, so
+    // there's nothing here to drift out of sync.
+    dailyApplicantLimit: { type: Number, default: null },
+
+    // Upwork-style milestone flow: how many equal milestones the budget
+    // splits into once a creator is accepted (1-4, brand's choice at
+    // creation time — see PostCampaign.tsx). Replaces the earlier fixed
+    // 20%-advance/80%-final split. Only meaningful for paid campaigns.
+    milestoneCount: { type: Number, default: 2, min: 1, max: 4 },
+    // Brand-provided name for each milestone (e.g. "Concept & Script",
+    // "First 2 Reels") — index i corresponds to milestone order i+1.
+    // Empty/missing entries fall back to "Milestone N" at creation time
+    // (see milestone.service.js's createInitialMilestones).
+    milestoneTitles: { type: [String], default: [] },
 
     assignedCreator: { type: mongoose.Schema.Types.ObjectId, ref: 'CreatorProfile', default: null },
 

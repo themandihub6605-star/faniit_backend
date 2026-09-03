@@ -104,6 +104,12 @@ const verifyCheckout = catchAsync(async (req, res) => {
     notes: `Subscribed to ${plan.name}`,
   });
 
+  // Without this, `sub.plan` stays as just the ObjectId string — the
+  // frontend then can't read sub.plan.name/price/_id etc. off the
+  // response, which is exactly what caused the Pricing page's "Current
+  // Plan" button to never highlight correctly right after upgrading.
+  await sub.populate('plan');
+
   return new ApiResponse(200, sub, 'Subscription activated').send(res);
 });
 

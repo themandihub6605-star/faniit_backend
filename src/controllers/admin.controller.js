@@ -373,7 +373,10 @@ const updateReferralConfig = catchAsync(async (req, res) => {
   return new ApiResponse(200, config, 'Referral config updated').send(res);
 });
 
+
 // ---------- Withdrawal requests ----------
+// Status flow: initiated -> processing -> completed
+//                                       -> rejected (refunds `amount` in full)
 
 const listWithdrawals = catchAsync(async (req, res) => {
   const { status } = req.query;
@@ -382,29 +385,49 @@ const listWithdrawals = catchAsync(async (req, res) => {
   return new ApiResponse(200, withdrawals, 'Withdrawals fetched').send(res);
 });
 
-/** Marks a pending withdrawal as paid — money was already deducted from the
+/** Marks an initiated withdrawal as "processing" — Admin has picked it up
+ * and is in the middle of sending the payout, but hasn't confirmed it
+ * landed yet. Purely a status/visibility step; no money moves here. */
+const markWithdrawalProcessing = catchAsync(async (req, res) => {
+  const withdrawal = await Withdrawal.findById(req.params.id);
+  if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
+  if (withdrawal.status !== 'initiated') throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
+
+  withdrawal.status = 'processing';
+  withdrawal.processedBy = req.user._id;
+  await withdrawal.save();
+
+  return new ApiResponse(200, withdrawal, 'Withdrawal marked as processing').send(res);
+});
+
+/** Marks a withdrawal as completed — money was already deducted from the
  * wallet when the user requested it, so this is just a status change once
- * Admin has actually sent the payout via UPI/bank transfer outside the app. */
+ * Admin has actually sent the net payout via UPI/bank transfer outside the app. */
 const markWithdrawalPaid = catchAsync(async (req, res) => {
   const withdrawal = await Withdrawal.findById(req.params.id);
   if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
-  if (withdrawal.status !== 'pending') throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
+  if (!['initiated', 'processing'].includes(withdrawal.status)) {
+    throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
+  }
 
-  withdrawal.status = 'paid';
+  withdrawal.status = 'completed';
   withdrawal.processedBy = req.user._id;
   withdrawal.processedAt = new Date();
   await withdrawal.save();
 
-  return new ApiResponse(200, withdrawal, 'Withdrawal marked as paid').send(res);
+  return new ApiResponse(200, withdrawal, 'Withdrawal marked as completed').send(res);
 });
 
-/** Rejects a pending withdrawal and refunds the held amount back to the
- * user's wallet — the money was deducted on request, so this reverses it. */
+/** Rejects a withdrawal and refunds the FULL requested (gross) amount back
+ * to the user's wallet — since `amount` (not netPayoutAmount) was what was
+ * deducted on request, refunding `amount` reverses it exactly. */
 const rejectWithdrawal = catchAsync(async (req, res) => {
   const { reason } = req.body;
   const withdrawal = await Withdrawal.findById(req.params.id);
   if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
-  if (withdrawal.status !== 'pending') throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
+  if (!['initiated', 'processing'].includes(withdrawal.status)) {
+    throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
+  }
 
   withdrawal.status = 'rejected';
   withdrawal.adminNote = reason || '';
@@ -416,7 +439,6 @@ const rejectWithdrawal = catchAsync(async (req, res) => {
 
   return new ApiResponse(200, withdrawal, 'Withdrawal rejected and refunded to wallet').send(res);
 });
-
 // ---------- Site settings ----------
 
 const getSiteSettings = catchAsync(async (req, res) => {
@@ -438,7 +460,6 @@ const updateSiteSettings = catchAsync(async (req, res) => {
   await settings.save();
   return new ApiResponse(200, settings, 'Site settings updated').send(res);
 });
-
 // ---------- Broadcast notifications ----------
 
 /** Sends the same notification to many users at once — either everyone, or
@@ -639,6 +660,7 @@ module.exports = {
   getReferralConfig,
   updateReferralConfig,
   listWithdrawals,
+   markWithdrawalProcessing, 
   markWithdrawalPaid,
   rejectWithdrawal,
   getSiteSettings,

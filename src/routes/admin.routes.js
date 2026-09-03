@@ -32,8 +32,10 @@ router.patch('/agencies/:id/set-password', admin.setAgencyPassword);
 router.get('/referral-config', admin.getReferralConfig);
 router.patch('/referral-config', admin.updateReferralConfig);
 
-// Withdrawal requests
+// Withdrawal requests — status flow: initiated -> processing -> completed
+//                                                              -> rejected
 router.get('/withdrawals', admin.listWithdrawals);
+router.patch('/withdrawals/:id/processing', admin.markWithdrawalProcessing);
 router.patch('/withdrawals/:id/paid', admin.markWithdrawalPaid);
 router.patch('/withdrawals/:id/reject', admin.rejectWithdrawal);
 

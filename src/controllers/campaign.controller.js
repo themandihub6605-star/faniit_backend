@@ -53,6 +53,9 @@ const getMyDraftCampaign = catchAsync(async (req, res) => {
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
 
+  // TEMPORARY-DEBUG — remove once milestone data is confirmed flowing correctly
+  console.log('[DEBUG getMyDraftCampaign] milestoneCount:', campaign.milestoneCount, '| milestoneTitles:', campaign.milestoneTitles);
+
   return new ApiResponse(200, campaign, 'Draft fetched').send(res);
 });
 
@@ -81,6 +84,9 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
   if (campaign.status !== CAMPAIGN_STATUS.DRAFT) throw ApiError.conflict('Only draft campaigns can be edited this way');
 
+  // TEMPORARY-DEBUG — remove once milestone data is confirmed flowing correctly
+  console.log('[DEBUG updateDraftCampaign] req.body.milestoneCount:', req.body.milestoneCount, '| req.body.milestoneTitles:', req.body.milestoneTitles);
+
   // applicantLimit / dailyApplicantLimit are only settable if the brand's
   // active plan allows it — silently dropped (not an error) if they're
   // not entitled to it, so the rest of the draft update still succeeds.
@@ -99,6 +105,9 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   // draft update.
   if (req.body.milestoneCount !== undefined) {
     campaign.milestoneCount = Math.min(4, Math.max(1, Number(req.body.milestoneCount) || 2));
+  }
+  if (req.body.milestoneTitles !== undefined) {
+    campaign.milestoneTitles = Array.isArray(req.body.milestoneTitles) ? req.body.milestoneTitles.slice(0, 4) : [];
   }
 
   const editableFields = [
@@ -135,6 +144,10 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   }
 
   await campaign.save();
+
+  // TEMPORARY-DEBUG — remove once milestone data is confirmed flowing correctly
+  console.log('[DEBUG updateDraftCampaign] SAVED campaign.milestoneCount:', campaign.milestoneCount, '| campaign.milestoneTitles:', campaign.milestoneTitles);
+
   return new ApiResponse(200, campaign, 'Draft updated').send(res);
 });
 

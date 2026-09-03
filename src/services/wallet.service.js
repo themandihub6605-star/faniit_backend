@@ -3,38 +3,25 @@ const env = require('../config/env');
 const { creditReferralCommission } = require('./referral.service');
 
 /**
- * Splits a gross amount into platform commission, agency commission (if the
- * creator is under an agency), referral commission (if the creator was
- * referred by someone under the referral program) and the creator's net
- * take-home. All amounts in paise.
+ * Splits a gross amount into agency commission (if the creator is under an
+ * agency), referral commission (if the creator was referred by someone
+ * under the referral program), and the creator's wallet credit. All
+ * amounts in paise.
  *
- * Platform commission % now comes from the creator's active subscription
- * plan (9% Lite / 5% Pro) rather than a single global rate — falls back to
- * the global SiteSettings rate only if the plan lookup somehow fails.
+ * IMPORTANT CHANGE: platform commission is NO LONGER deducted here. It
+ * used to be cut at earn-time using whatever plan the creator was on
+ * back then. It's now calculated and deducted at WITHDRAWAL time instead
+ * (see wallet.controller.js's requestWithdrawal), using the creator's
+ * CURRENT plan at the moment they actually request a payout — so the
+ * wallet balance a creator sees is the full gross amount they earned,
+ * and the fee is transparently shown/deducted only when they cash out.
+ * `platformCommission` is still returned (always 0) purely so callers
+ * that log it on a Transaction record don't need special-casing.
  */
 async function splitEarnings(grossAmount, creatorProfileId, relatedModel = null, relatedId = null) {
   const creator = await CreatorProfile.findById(creatorProfileId);
 
-  let commissionPercent;
-  try {
-    // Lazy require: subscription.service.js requires this file back (for
-    // debitUser), so a top-level require here would create a
-    // circular-dependency load order issue — requiring it inside the
-    // function body sidesteps that.
-    const { getCreatorPlanFields } = require('./subscription.service');
-    const plan = creator?.user ? await getCreatorPlanFields(creator.user) : null;
-    commissionPercent = plan ? plan.platformFeePercent : null;
-  } catch {
-    commissionPercent = null;
-  }
-  if (commissionPercent == null) {
-    const settings = await SiteSettings.getSingleton().catch(() => null);
-    commissionPercent = settings ? settings.platformCommissionPercent : env.platform.commissionPercent;
-  }
-
-  const platformCommission = Math.round((grossAmount * commissionPercent) / 100);
-  let remaining = grossAmount - platformCommission;
-
+  let remaining = grossAmount;
   let agencyCommission = 0;
 
   if (creator?.agency) {
@@ -55,10 +42,13 @@ async function splitEarnings(grossAmount, creatorProfileId, relatedModel = null,
     remaining -= referralCommission;
   }
 
-  return { platformCommission, agencyCommission, referralCommission, netAmount: remaining };
+  return { platformCommission: 0, agencyCommission, referralCommission, netAmount: remaining };
 }
 
-/** Credits a creator's wallet + running earnings totals. */
+/** Credits a creator's wallet + running earnings totals. `netAmount` here
+ * is gross-of-platform-fee (agency/referral already subtracted by
+ * splitEarnings above) — the platform fee is deducted later, at
+ * withdrawal time, not here. */
 async function creditCreator(creatorProfileId, netAmount) {
   const creator = await CreatorProfile.findById(creatorProfileId);
   if (!creator) return;
@@ -76,4 +66,25 @@ async function debitUser(userId, amount) {
   await User.findByIdAndUpdate(userId, { $inc: { walletBalance: -amount } });
 }
 
-module.exports = { splitEarnings, creditCreator, debitUser };
+/** Platform fee % to apply at withdrawal time — the creator's CURRENT
+ * plan (not whatever plan they were on when they originally earned the
+ * money). Falls back to the global SiteSettings rate for non-creators or
+ * if the plan lookup fails, mirroring the old splitEarnings fallback. */
+async function getPlatformFeePercentFor(user) {
+  const { ROLES } = require('../constants/enums');
+  if (user.role === ROLES.CREATOR) {
+    try {
+      // Lazy require to sidestep the same circular-dependency issue
+      // noted in splitEarnings above.
+      const { getCreatorPlanFields } = require('./subscription.service');
+      const plan = await getCreatorPlanFields(user._id);
+      if (plan?.platformFeePercent != null) return plan.platformFeePercent;
+    } catch {
+      // fall through to site default
+    }
+  }
+  const settings = await SiteSettings.getSingleton().catch(() => null);
+  return settings ? settings.platformCommissionPercent : env.platform.commissionPercent;
+}
+
+module.exports = { splitEarnings, creditCreator, debitUser, getPlatformFeePercentFor };

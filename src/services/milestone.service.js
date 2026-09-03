@@ -33,7 +33,8 @@ async function createInitialMilestones(campaign) {
   const milestonesData = Array.from({ length: count }, (_, i) => ({
     campaign: campaign._id,
     creator: campaign.assignedCreator,
-    title: count === 1 ? 'Full payment' : `Milestone ${i + 1}`,
+    title: (campaign.milestoneTitles && campaign.milestoneTitles[i] && campaign.milestoneTitles[i].trim())
+      || (count === 1 ? 'Full payment' : `Milestone ${i + 1}`),
     amount: perMilestone + (i === count - 1 ? remainder : 0),
     order: i + 1,
     isAdvance: i === 0,

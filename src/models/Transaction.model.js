@@ -17,11 +17,14 @@ const transactionSchema = new mongoose.Schema(
     netAmount: { type: Number, default: 0 }, // amount actually credited to `to`
 
     // polymorphic reference to whatever this transaction is for
-    // 'Milestone' added for Point 12 — a milestone-level escrow deposit or
-    // payout points here instead of straight at 'Campaign', so multiple
-    // transactions (advance + final) can be traced back to their own
-    // milestone rather than colliding on one Campaign relatedId.
-    relatedModel: { type: String, enum: ['Booking', 'Campaign', 'Session', 'Milestone'], default: null },
+    // 'Milestone' — Point 12 milestone-level escrow deposits/payouts.
+    // 'UserSubscription' — subscription checkout/renewal payments (see
+    // subscription.controller.js's verifyCheckout) — was missing here,
+    // which made every subscription-payment Transaction throw a Mongoose
+    // validation error even though the subscription itself had already
+    // been activated successfully just before that Transaction.create()
+    // call ran.
+    relatedModel: { type: String, enum: ['Booking', 'Campaign', 'Session', 'Milestone', 'UserSubscription'], default: null },
     relatedId: { type: mongoose.Schema.Types.ObjectId, default: null },
 
     // Razorpay references

@@ -14,6 +14,16 @@ const NOTIFICATION_TYPES = [
   'payout_released',
   'account_verified',
   'general',
+  // Point 12 (Upwork-style milestone escrow) — added when milestone
+  // funding/submission/dispute notifications started being sent from
+  // milestone.service.js / dispute.service.js; missing entries here
+  // made notificationService.notify(...) throw a Mongoose validation
+  // error and silently abort the whole request that triggered it.
+  'milestone_funded',
+  'milestone_submitted',
+  'milestone_changes_requested',
+  'dispute_raised',
+  'dispute_refund',
 ];
 
 const notificationSchema = new mongoose.Schema(
