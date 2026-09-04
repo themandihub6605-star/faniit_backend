@@ -478,6 +478,16 @@ const decideApplication = catchAsync(async (req, res) => {
 
   if (decision === 'accepted') {
     campaign.assignedCreator = application.creator;
+
+    // Bug fix: if the creator quoted a different (usually lower) amount
+    // than the brand's posted budget, that quote is what they actually
+    // agreed to work for — milestones must split THAT amount, not the
+    // original posted budget. Without this, a creator who bid ₹8 on a
+    // ₹12 campaign still ends up with milestones totalling ₹12.
+    if (campaign.campaignType === CAMPAIGN_TYPE.PAID && application.quotedAmount != null && application.quotedAmount > 0) {
+      campaign.budget = application.quotedAmount;
+    }
+
     await campaign.save();
 
     // Point 12: milestone-based escrow only applies to paid campaigns —

@@ -82,7 +82,7 @@ const requestWithdrawal = catchAsync(async (req, res) => {
   return new ApiResponse(
     201,
     withdrawal,
-    `Withdrawal requested — ₹${(netPayoutAmount / 100).toFixed(2)} will be sent to your ${payoutMethod === 'upi' ? 'UPI ID' : 'bank account'} within 72 hours, after platform fee.`
+    `Withdrawal requested — ₹${(netPayoutAmount / 100).toFixed(2)} will be sent to your ${payoutMethod === 'upi' ? 'UPI ID' : 'bank account'} within 48 hours, after platform fee.`
   ).send(res);
 });
 
