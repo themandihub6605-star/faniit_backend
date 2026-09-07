@@ -91,4 +91,43 @@ const getMyWithdrawals = catchAsync(async (req, res) => {
   return new ApiResponse(200, withdrawals, 'Withdrawals fetched').send(res);
 });
 
-module.exports = { getMyWallet, previewWithdrawal, requestWithdrawal, getMyWithdrawals };
+/** GET /api/wallet/transactions — full, paginated transaction history,
+ * every type and status (not just the 5-item SUCCESS/RELEASED preview
+ * getMyWallet returns for the balance card). Each transaction gets a
+ * `direction` field ('credit'/'debit' relative to the requesting user)
+ * computed server-side so the frontend never has to compare user IDs
+ * itself — just read direction and color/sign accordingly. */
+const getMyTransactions = catchAsync(async (req, res) => {
+  const { page = 1, limit = 20, type, status } = req.query;
+  const filter = { $or: [{ from: req.user._id }, { to: req.user._id }] };
+  if (type) filter.type = type;
+  if (status) filter.status = status;
+
+  const [transactions, total] = await Promise.all([
+    Transaction.find(filter)
+      .populate('from', 'name email')
+      .populate('to', 'name email')
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit)),
+    Transaction.countDocuments(filter),
+  ]);
+
+  // toObject() carries every field on the document (razorpay ids,
+  // commission breakdown, escrow timestamps, notes, etc.) — nothing extra
+  // to add here beyond `direction`, which is what the tap-to-expand
+  // detail view on the frontend needs.
+  const withDirection = transactions.map((t) => {
+    const obj = t.toObject();
+    obj.direction = t.to && String(t.to._id || t.to) === String(req.user._id) ? 'credit' : 'debit';
+    return obj;
+  });
+
+  return new ApiResponse(
+    200,
+    { transactions: withDirection, total, page: Number(page), pages: Math.ceil(total / Number(limit)) },
+    'Transactions fetched'
+  ).send(res);
+});
+
+module.exports = { getMyWallet, previewWithdrawal, requestWithdrawal, getMyWithdrawals, getMyTransactions };

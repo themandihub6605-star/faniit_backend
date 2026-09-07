@@ -39,6 +39,7 @@ const APPLICATION_STATUS = Object.freeze({
 const TRANSACTION_TYPE = Object.freeze({
   SESSION_PAYMENT: 'session_payment',
   DONATION: 'donation',
+  GIFT: 'gift',
   CAMPAIGN_ESCROW_DEPOSIT: 'campaign_escrow_deposit',
   CAMPAIGN_PAYOUT: 'campaign_payout',
   CAMPAIGN_POSTING_FEE: 'campaign_posting_fee',

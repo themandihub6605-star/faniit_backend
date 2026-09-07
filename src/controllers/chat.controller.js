@@ -1,32 +1,10 @@
-const { Conversation, Message, BrandProfile } = require('../models');
+const { Conversation, Message, BrandProfile, User, Application } = require('../models');
 const notificationService = require('../services/notification.service');
-const subscriptionService = require('../services/subscription.service');
 const { getIO } = require('../config/socket');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { ROLES, SUBSCRIPTION_APPLIES_TO } = require('../constants/enums');
-
-/** Messaging is Pro-only for creators and brands — a Lite creator/brand
- * cannot start a conversation or send a message, to anyone, regardless of
- * the other side's plan. Fans, agencies, and admins aren't gated (they
- * have no subscription plan to check). Throws with a stable errorCode so
- * the frontend can catch this specifically and show an upgrade prompt
- * instead of a generic error. This is a defense-in-depth check — the
- * primary UX gate lives on the frontend "Message" button itself, before
- * it even navigates here. */
-async function assertCanMessage(user) {
-  if (user.role !== ROLES.CREATOR && user.role !== ROLES.BRAND) return;
-
-  const plan =
-    user.role === ROLES.CREATOR
-      ? await subscriptionService.getCreatorPlanFields(user._id)
-      : await subscriptionService.getBrandPlanFields(user._id);
-
-  if (plan.price === 0) {
-    throw ApiError.forbidden('Messaging is a Pro feature — upgrade your plan to message others.', [], 'MESSAGING_PRO_ONLY');
-  }
-}
+const { ROLES } = require('../constants/enums');
 
 /** Chat should always show a *public identity* — a brand's company name and
  * logo, never the personal name/photo they signed up with (which is often
@@ -65,15 +43,33 @@ const listConversations = catchAsync(async (req, res) => {
   return new ApiResponse(200, withUnread, 'Conversations fetched').send(res);
 });
 
+/** POST /chat/conversations { userId } — generic conversation start, for
+ * any pair EXCEPT creator<->brand. That specific pair can now ONLY talk
+ * through a campaign proposal (see startConversationForApplication
+ * below) — this function explicitly rejects it, so fan<->creator,
+ * fan<->brand, agency<->anyone, etc. all keep working exactly as before,
+ * while the one pair that used to bypass proposals entirely no longer can. */
 const startConversation = catchAsync(async (req, res) => {
-  await assertCanMessage(req.user);
-
   const { userId } = req.body;
   if (!userId) throw ApiError.badRequest('userId is required');
   if (userId === String(req.user._id)) throw ApiError.badRequest('You cannot message yourself');
 
+  const otherUser = await User.findById(userId).select('role');
+  if (!otherUser) throw ApiError.notFound('User not found');
+
+  const pairRoles = [req.user.role, otherUser.role].sort();
+  const isCreatorBrandPair = pairRoles[0] === ROLES.BRAND && pairRoles[1] === ROLES.CREATOR;
+  if (isCreatorBrandPair) {
+    throw ApiError.forbidden(
+      'Creators and brands can only message each other through a campaign proposal — apply to a campaign, or reply to an applicant, to start that conversation.',
+      [],
+      'PROPOSAL_ONLY_MESSAGING'
+    );
+  }
+
   let conversation = await Conversation.findOne({
     participants: { $all: [req.user._id, userId], $size: 2 },
+    application: null,
   });
 
   if (!conversation) {
@@ -81,6 +77,52 @@ const startConversation = catchAsync(async (req, res) => {
   }
 
   return new ApiResponse(200, conversation, 'Conversation ready').send(res);
+});
+
+/** POST /chat/applications/:applicationId/start — the ONLY way a creator
+ * and brand can start messaging each other. Only the campaign's brand
+ * owner may call this (the creator gets a 403 if they try) — matches the
+ * flow: creator sends a proposal, the brand may respond to it, and only
+ * then can the creator reply back, all within this one thread. Idempotent
+ * — calling it again just returns the same conversation. */
+const startConversationForApplication = catchAsync(async (req, res) => {
+  const application = await Application.findById(req.params.applicationId)
+    .populate({ path: 'campaign', populate: { path: 'brand' } })
+    .populate('creator');
+  if (!application) throw ApiError.notFound('Proposal not found');
+  if (!application.campaign) throw ApiError.notFound('Campaign for this proposal no longer exists');
+
+  const brandUserId = application.campaign.brand.user;
+  const creatorUserId = application.creator.user;
+
+  if (!brandUserId.equals(req.user._id)) {
+    throw ApiError.forbidden('Only the brand can start this conversation — the creator can reply once the brand has responded.');
+  }
+
+  let conversation = await Conversation.findOne({ application: application._id });
+  if (!conversation) {
+    conversation = await Conversation.create({
+      participants: [brandUserId, creatorUserId],
+      application: application._id,
+      campaign: application.campaign._id,
+    });
+  }
+
+  return new ApiResponse(200, conversation, 'Conversation ready').send(res);
+});
+
+/** GET /chat/applications/:applicationId — lets the creator (or brand)
+ * check whether a conversation already exists for one of their
+ * proposals, WITHOUT creating one. A creator calling this before the
+ * brand has replied just gets `null` back — that's the frontend's signal
+ * to show "waiting for the brand to reply" instead of opening a chat. */
+const getConversationForApplication = catchAsync(async (req, res) => {
+  const conversation = await Conversation.findOne({ application: req.params.applicationId });
+  if (!conversation) return new ApiResponse(200, null, 'No conversation yet').send(res);
+  if (!conversation.participants.some((p) => p.equals(req.user._id))) {
+    throw ApiError.forbidden('You are not part of this conversation');
+  }
+  return new ApiResponse(200, conversation, 'Conversation fetched').send(res);
 });
 
 const getMessages = catchAsync(async (req, res) => {
@@ -108,9 +150,13 @@ const getMessages = catchAsync(async (req, res) => {
   return new ApiResponse(200, messages, 'Messages fetched').send(res);
 });
 
+// Point-Fix: the Pro-only plan gate (assertCanMessage) that used to run
+// here has been removed. Creator<->brand messaging is now gated
+// STRUCTURALLY — a conversation between them literally cannot exist
+// without going through startConversationForApplication above — so the
+// plan check is redundant for that pair, and other pairs (fan<->creator
+// etc.) were never plan-gated to begin with.
 const sendMessage = catchAsync(async (req, res) => {
-  await assertCanMessage(req.user);
-
   const { text } = req.body;
   if (!text?.trim()) throw ApiError.badRequest('Message text is required');
 
@@ -154,4 +200,11 @@ const sendMessage = catchAsync(async (req, res) => {
   return new ApiResponse(201, message, 'Message sent').send(res);
 });
 
-module.exports = { listConversations, startConversation, getMessages, sendMessage, assertCanMessage };
+module.exports = {
+  listConversations,
+  startConversation,
+  startConversationForApplication,
+  getConversationForApplication,
+  getMessages,
+  sendMessage,
+};
