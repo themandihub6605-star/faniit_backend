@@ -1,6 +1,13 @@
-const { Campaign, Milestone } = require('../models');
+const { Campaign, Milestone, CreatorProfile, SiteSettings } = require('../models');
 const paymentService = require('../services/payment.service');
 const milestoneService = require('../services/milestone.service');
+const {
+  sendMilestoneFundedEmail,
+  sendMilestoneSubmittedEmail,
+  sendMilestoneReleasedEmail,
+  sendMilestoneChangesRequestedEmail,
+  sendDisputeRaisedEmail,
+} = require('../services/email.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -57,6 +64,26 @@ const verifyMilestonePayment = catchAsync(async (req, res) => {
     razorpayPaymentId,
   });
 
+  // Point-Fix: email the creator that this milestone is funded and they
+  // can begin work. Population is separate from the funding logic above
+  // (milestoneService.fundMilestone doesn't need the creator's email, so
+  // this is kept local to where it's actually used) — a failed lookup or
+  // email send here must never affect the funding result already returned.
+  try {
+    const creatorProfile = await CreatorProfile.findById(fundedMilestone.creator).populate('user', 'name email');
+    if (creatorProfile?.user?.email) {
+      sendMilestoneFundedEmail({
+        to: creatorProfile.user.email,
+        name: creatorProfile.user.name,
+        campaignTitle: campaign.title,
+        milestoneTitle: fundedMilestone.title,
+        amount: fundedMilestone.amount,
+      });
+    }
+  } catch (err) {
+    console.error('[milestone.controller] Failed to send funded email:', err.message);
+  }
+
   return new ApiResponse(200, fundedMilestone, 'Milestone funded — creator can now begin work').send(res);
 });
 
@@ -87,6 +114,21 @@ const submitMilestone = catchAsync(async (req, res) => {
     attachments: filesToAttachments(req.files),
   });
 
+  // Point-Fix: email the brand that a submission is ready for review.
+  try {
+    const campaign = await Campaign.findById(milestone.campaign).populate({ path: 'brand', populate: { path: 'user', select: 'name email' } });
+    if (campaign?.brand?.user?.email) {
+      sendMilestoneSubmittedEmail({
+        to: campaign.brand.user.email,
+        name: campaign.brand.user.name,
+        campaignTitle: campaign.title,
+        milestoneTitle: milestone.title,
+      });
+    }
+  } catch (err) {
+    console.error('[milestone.controller] Failed to send submitted email:', err.message);
+  }
+
   return new ApiResponse(200, milestone, 'Work submitted').send(res);
 });
 
@@ -99,6 +141,22 @@ const approveMilestone = catchAsync(async (req, res) => {
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
 
   await milestoneService.releaseMilestone({ milestoneId: milestone._id, releasedByUserId: req.user._id });
+
+  // Point-Fix: email the creator that payment has landed in their wallet.
+  try {
+    const creatorProfile = await CreatorProfile.findById(milestone.creator).populate('user', 'name email');
+    if (creatorProfile?.user?.email) {
+      sendMilestoneReleasedEmail({
+        to: creatorProfile.user.email,
+        name: creatorProfile.user.name,
+        campaignTitle: campaign.title,
+        milestoneTitle: milestone.title,
+        amount: milestone.amount,
+      });
+    }
+  } catch (err) {
+    console.error('[milestone.controller] Failed to send released email:', err.message);
+  }
 
   return new ApiResponse(200, null, 'Milestone approved — payment released to creator').send(res);
 });
@@ -125,6 +183,23 @@ const requestMilestoneChanges = catchAsync(async (req, res) => {
     attachments: filesToAttachments(req.files),
   });
 
+  // Point-Fix: email the creator with what needs to change.
+  try {
+    const campaign = await Campaign.findById(milestone.campaign);
+    const creatorProfile = await CreatorProfile.findById(milestone.creator).populate('user', 'name email');
+    if (creatorProfile?.user?.email) {
+      sendMilestoneChangesRequestedEmail({
+        to: creatorProfile.user.email,
+        name: creatorProfile.user.name,
+        campaignTitle: campaign?.title || 'your campaign',
+        milestoneTitle: milestone.title,
+        changeDescription: changeDescription.trim(),
+      });
+    }
+  } catch (err) {
+    console.error('[milestone.controller] Failed to send changes-requested email:', err.message);
+  }
+
   return new ApiResponse(200, milestone, 'Change request sent to creator').send(res);
 });
 
@@ -140,6 +215,24 @@ const raiseMilestoneDispute = catchAsync(async (req, res) => {
     reason: reason.trim(),
     attachments: filesToAttachments(req.files),
   });
+
+  // Point-Fix: email the Fanitt team (SiteSettings.supportEmail) so a
+  // dispute doesn't sit unnoticed until someone happens to check the
+  // admin panel.
+  try {
+    const milestone = await Milestone.findById(req.params.id).populate('campaign');
+    const settings = await SiteSettings.getSingleton();
+    if (settings?.supportEmail && milestone?.campaign) {
+      sendDisputeRaisedEmail({
+        to: settings.supportEmail,
+        campaignTitle: milestone.campaign.title,
+        milestoneTitle: milestone.title,
+        reason: reason.trim(),
+      });
+    }
+  } catch (err) {
+    console.error('[milestone.controller] Failed to send dispute-raised email:', err.message);
+  }
 
   return new ApiResponse(201, dispute, 'Dispute raised — the Fanitt team will review it').send(res);
 });

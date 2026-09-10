@@ -1,10 +1,11 @@
-const { Session, CreatorProfile } = require('../models');
+const { Session, CreatorProfile, Booking, User } = require('../models');
 const zoomService = require('../services/zoom.service');
 const env = require('../config/env');
+const { sendSessionCancelledEmail } = require('../services/email.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { ROLES, SESSION_TYPES } = require('../constants/enums');
+const { ROLES, SESSION_TYPES, BOOKING_STATUS } = require('../constants/enums');
 
 const uploadBanner = catchAsync(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('No file uploaded');
@@ -92,13 +93,37 @@ const updateSession = catchAsync(async (req, res) => {
   return new ApiResponse(200, session, 'Session updated').send(res);
 });
 
+// Point-Fix: cancelling a session now emails everyone who'd booked it —
+// previously this only flipped the isCancelled flag with no notice to
+// attendees at all. Looked up via Booking (not stored on Session), and
+// only CONFIRMED bookings are notified — a booking someone already
+// cancelled themselves doesn't need a "this was cancelled" email.
+// Emails are sent best-effort (fire-and-forget per recipient) so one bad
+// address can't block the others or the cancellation itself.
 const cancelSession = catchAsync(async (req, res) => {
-  const session = await Session.findById(req.params.id).populate('creator');
+  const session = await Session.findById(req.params.id).populate({ path: 'creator', populate: { path: 'user', select: 'name' } });
   if (!session) throw ApiError.notFound('Session not found');
-  if (!session.creator.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this session');
+  if (!session.creator.user._id.equals(req.user._id)) throw ApiError.forbidden('You do not own this session');
 
   session.isCancelled = true;
   await session.save();
+
+  try {
+    const bookings = await Booking.find({ session: session._id, status: BOOKING_STATUS.CONFIRMED }).populate('user', 'name email');
+    bookings.forEach((booking) => {
+      if (booking.user?.email) {
+        sendSessionCancelledEmail({
+          to: booking.user.email,
+          name: booking.user.name,
+          sessionTitle: session.title,
+          scheduledAt: session.scheduledAt,
+          otherPartyName: session.creator.user.name,
+        });
+      }
+    });
+  } catch (err) {
+    console.error('[session.controller] Failed to send cancellation emails:', err.message);
+  }
 
   return new ApiResponse(200, null, 'Session cancelled').send(res);
 });

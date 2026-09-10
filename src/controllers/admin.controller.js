@@ -17,6 +17,7 @@ const {
 } = require('../models');
 const escrowService = require('../services/escrow.service');
 const subscriptionService = require('../services/subscription.service');
+const { sendAccountApprovedEmail, sendAccountRejectedEmail, sendWithdrawalCompletedEmail, sendWithdrawalRejectedEmail } = require('../services/email.service');
 const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
@@ -86,17 +87,41 @@ const listPendingVerifications = catchAsync(async (req, res) => {
   return new ApiResponse(200, { pendingCreators, pendingBrands }, 'Pending verifications fetched').send(res);
 });
 
+// Point-Fix: populate('user') added so we have the email/name to send the
+// approval/rejection email — the update itself doesn't need it, only the
+// email does. Email send is fire-and-forget (not awaited into the
+// response) and wrapped so a failed send never blocks or fails the
+// actual approval action — see email.service.js's own try/catch too, this
+// is defense in depth.
 const verifyCreator = catchAsync(async (req, res) => {
-  const { decision } = req.body; // 'verified' | 'rejected'
-  const creator = await CreatorProfile.findByIdAndUpdate(req.params.id, { verificationStatus: decision }, { new: true });
+  const { decision, rejectionReason } = req.body; // 'verified' | 'rejected'
+  const creator = await CreatorProfile.findByIdAndUpdate(req.params.id, { verificationStatus: decision }, { new: true }).populate('user', 'name email');
   if (!creator) throw ApiError.notFound('Creator not found');
+
+  if (creator.user?.email) {
+    if (decision === VERIFICATION_STATUS.VERIFIED) {
+      sendAccountApprovedEmail({ to: creator.user.email, name: creator.user.name, role: 'creator' });
+    } else if (decision === VERIFICATION_STATUS.REJECTED) {
+      sendAccountRejectedEmail({ to: creator.user.email, name: creator.user.name, role: 'creator', reason: rejectionReason });
+    }
+  }
+
   return new ApiResponse(200, creator, `Creator ${decision}`).send(res);
 });
 
 const verifyBrand = catchAsync(async (req, res) => {
-  const { decision } = req.body;
-  const brand = await BrandProfile.findByIdAndUpdate(req.params.id, { verificationStatus: decision }, { new: true });
+  const { decision, rejectionReason } = req.body;
+  const brand = await BrandProfile.findByIdAndUpdate(req.params.id, { verificationStatus: decision }, { new: true }).populate('user', 'name email');
   if (!brand) throw ApiError.notFound('Brand not found');
+
+  if (brand.user?.email) {
+    if (decision === VERIFICATION_STATUS.VERIFIED) {
+      sendAccountApprovedEmail({ to: brand.user.email, name: brand.user.name, role: 'brand' });
+    } else if (decision === VERIFICATION_STATUS.REJECTED) {
+      sendAccountRejectedEmail({ to: brand.user.email, name: brand.user.name, role: 'brand', reason: rejectionReason });
+    }
+  }
+
   return new ApiResponse(200, brand, `Brand ${decision}`).send(res);
 });
 
@@ -184,6 +209,8 @@ const setAgencyPassword = catchAsync(async (req, res) => {
   ).send(res);
 });
 
+// Point-Fix: populate('user') added for the approval/rejection email — same
+// pattern as verifyCreator/verifyBrand above.
 const verifyAgency = catchAsync(async (req, res) => {
   const { decision, rejectionReason } = req.body; // decision: 'verified' | 'rejected'
   const { AgencyProfile } = require('../models');
@@ -192,8 +219,17 @@ const verifyAgency = catchAsync(async (req, res) => {
     req.params.id,
     { verificationStatus: decision, rejectionReason: decision === 'rejected' ? rejectionReason || '' : '' },
     { new: true }
-  );
+  ).populate('user', 'name email');
   if (!agency) throw ApiError.notFound('Agency not found');
+
+  if (agency.user?.email) {
+    if (decision === VERIFICATION_STATUS.VERIFIED) {
+      sendAccountApprovedEmail({ to: agency.user.email, name: agency.user.name, role: 'agency' });
+    } else if (decision === VERIFICATION_STATUS.REJECTED) {
+      sendAccountRejectedEmail({ to: agency.user.email, name: agency.user.name, role: 'agency', reason: rejectionReason });
+    }
+  }
+
   return new ApiResponse(200, agency, `Agency ${decision}`).send(res);
 });
 
@@ -404,7 +440,7 @@ const markWithdrawalProcessing = catchAsync(async (req, res) => {
  * wallet when the user requested it, so this is just a status change once
  * Admin has actually sent the net payout via UPI/bank transfer outside the app. */
 const markWithdrawalPaid = catchAsync(async (req, res) => {
-  const withdrawal = await Withdrawal.findById(req.params.id);
+  const withdrawal = await Withdrawal.findById(req.params.id).populate('user', 'name email');
   if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
   if (!['initiated', 'processing'].includes(withdrawal.status)) {
     throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
@@ -415,6 +451,15 @@ const markWithdrawalPaid = catchAsync(async (req, res) => {
   withdrawal.processedAt = new Date();
   await withdrawal.save();
 
+  if (withdrawal.user?.email) {
+    sendWithdrawalCompletedEmail({
+      to: withdrawal.user.email,
+      name: withdrawal.user.name,
+      netAmount: withdrawal.netPayoutAmount,
+      payoutMethod: withdrawal.payoutMethod,
+    });
+  }
+
   return new ApiResponse(200, withdrawal, 'Withdrawal marked as completed').send(res);
 });
 
@@ -423,7 +468,7 @@ const markWithdrawalPaid = catchAsync(async (req, res) => {
  * deducted on request, refunding `amount` reverses it exactly. */
 const rejectWithdrawal = catchAsync(async (req, res) => {
   const { reason } = req.body;
-  const withdrawal = await Withdrawal.findById(req.params.id);
+  const withdrawal = await Withdrawal.findById(req.params.id).populate('user', 'name email');
   if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
   if (!['initiated', 'processing'].includes(withdrawal.status)) {
     throw ApiError.badRequest(`This withdrawal is already ${withdrawal.status}`);
@@ -435,7 +480,16 @@ const rejectWithdrawal = catchAsync(async (req, res) => {
   withdrawal.processedAt = new Date();
   await withdrawal.save();
 
-  await User.findByIdAndUpdate(withdrawal.user, { $inc: { walletBalance: withdrawal.amount } });
+  await User.findByIdAndUpdate(withdrawal.user._id, { $inc: { walletBalance: withdrawal.amount } });
+
+  if (withdrawal.user?.email) {
+    sendWithdrawalRejectedEmail({
+      to: withdrawal.user.email,
+      name: withdrawal.user.name,
+      amount: withdrawal.amount,
+      reason,
+    });
+  }
 
   return new ApiResponse(200, withdrawal, 'Withdrawal rejected and refunded to wallet').send(res);
 });

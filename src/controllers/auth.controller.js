@@ -7,6 +7,7 @@ const ApiError = require('../utils/apiError');
 const ApiResponse = require('../utils/apiResponse');
 const { ROLES } = require('../constants/enums');
 const { resolveReferrer } = require('../services/referral.service');
+const { sendPasswordResetEmail } = require('../services/email.service');
 
 function issueTokens(res, user) {
   const accessToken = generateAccessToken(user._id, user.role);
@@ -109,6 +110,12 @@ const getMe = catchAsync(async (req, res) => {
   return new ApiResponse(200, { ...req.user.toSafeObject(), profileStatus }, 'Current user fetched').send(res);
 });
 
+// Point-Fix: this used to generate and save a reset token but NEVER
+// actually send it anywhere — the person requesting a reset had no way
+// to get the link at all. Now sends the RAW (unhashed) token in the
+// email link; only the SHA-256 hash of it is stored in the DB (standard
+// practice — if the DB ever leaked, the stored hash alone can't be used
+// to reset anyone's password).
 const forgotPassword = catchAsync(async (req, res) => {
   const { email } = req.body;
   const user = await User.findOne({ email });
@@ -118,6 +125,12 @@ const forgotPassword = catchAsync(async (req, res) => {
     user.passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
     user.passwordResetExpires = Date.now() + 15 * 60 * 1000;
     await user.save({ validateBeforeSave: false });
+
+    sendPasswordResetEmail({
+      to: user.email,
+      name: user.name,
+      resetLink: `https://fanitt.com/reset-password?token=${resetToken}`,
+    });
   }
 
   return new ApiResponse(200, null, 'If that email exists, a reset link has been sent').send(res);

@@ -2,6 +2,7 @@ const razorpay = require('../config/razorpay');
 const { SubscriptionPlan, UserSubscription, Transaction } = require('../models');
 const paymentService = require('../services/payment.service');
 const subscriptionService = require('../services/subscription.service');
+const { sendSubscriptionConfirmationEmail } = require('../services/email.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -109,6 +110,19 @@ const verifyCheckout = catchAsync(async (req, res) => {
   // response, which is exactly what caused the Pricing page's "Current
   // Plan" button to never highlight correctly right after upgrading.
   await sub.populate('plan');
+
+  // Point-Fix: confirmation email doubles as the receipt for this
+  // payment — req.user.email/name come straight off the authenticated
+  // user, no extra lookup needed.
+  if (req.user.email) {
+    sendSubscriptionConfirmationEmail({
+      to: req.user.email,
+      name: req.user.name,
+      planName: plan.name,
+      price: plan.price,
+      billingCycle: plan.billingCycle,
+    });
+  }
 
   return new ApiResponse(200, sub, 'Subscription activated').send(res);
 });

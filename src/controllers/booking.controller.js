@@ -2,6 +2,7 @@ const { Booking, Session, Transaction } = require('../models');
 const paymentService = require('../services/payment.service');
 const walletService = require('../services/wallet.service');
 const notificationService = require('../services/notification.service');
+const { sendSessionBookingConfirmationEmail, sendSessionCancelledEmail } = require('../services/email.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -11,7 +12,11 @@ const { BOOKING_STATUS, TRANSACTION_TYPE, TRANSACTION_STATUS, SESSION_TYPES } = 
 const createBooking = catchAsync(async (req, res) => {
   const { sessionId } = req.body;
 
-  const session = await Session.findById(sessionId).populate('creator');
+  // Point-Fix: nested populate to session.creator.user — needed for the
+  // creator's name in the confirmation email below (the free-session path
+  // confirms instantly here, so there's no later verify-payment step to
+  // do this lookup instead, unlike the paid path).
+  const session = await Session.findById(sessionId).populate({ path: 'creator', populate: { path: 'user', select: 'name' } });
   if (!session) throw ApiError.notFound('Session not found');
   if (session.isCancelled) throw ApiError.badRequest('This session has been cancelled');
   if (session.bookedCount >= session.maxParticipants) throw ApiError.badRequest('This session is fully booked');
@@ -39,6 +44,16 @@ const createBooking = catchAsync(async (req, res) => {
       relatedId: session._id,
     });
 
+    if (req.user.email) {
+      sendSessionBookingConfirmationEmail({
+        to: req.user.email,
+        name: req.user.name,
+        sessionTitle: session.title,
+        scheduledAt: session.scheduledAt,
+        otherPartyName: session.creator?.user?.name || 'the creator',
+      });
+    }
+
     return new ApiResponse(201, { booking, requiresPayment: false }, 'Booking confirmed').send(res);
   }
 
@@ -65,7 +80,12 @@ const verifyBookingPayment = catchAsync(async (req, res) => {
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
 
-  const booking = await Booking.findById(bookingId).populate({ path: 'session', populate: 'creator' });
+  // Point-Fix: nested populate to session.creator.user — needed for the
+  // creator's name in the confirmation email below.
+  const booking = await Booking.findById(bookingId).populate({
+    path: 'session',
+    populate: { path: 'creator', populate: { path: 'user', select: 'name' } },
+  });
   if (!booking) throw ApiError.notFound('Booking not found');
   if (!booking.user.equals(req.user._id)) throw ApiError.forbidden('This booking does not belong to you');
 
@@ -111,6 +131,16 @@ const verifyBookingPayment = catchAsync(async (req, res) => {
     relatedId: booking.session._id,
   });
 
+  if (req.user.email) {
+    sendSessionBookingConfirmationEmail({
+      to: req.user.email,
+      name: req.user.name,
+      sessionTitle: booking.session.title,
+      scheduledAt: booking.session.scheduledAt,
+      otherPartyName: booking.session.creator?.user?.name || 'the creator',
+    });
+  }
+
   return new ApiResponse(200, { booking }, 'Payment verified, booking confirmed').send(res);
 });
 
@@ -123,12 +153,26 @@ const getMyBookings = catchAsync(async (req, res) => {
 });
 
 const cancelBooking = catchAsync(async (req, res) => {
-  const booking = await Booking.findById(req.params.id);
+  // Point-Fix: populate session.creator.user for the cancellation email.
+  const booking = await Booking.findById(req.params.id).populate({
+    path: 'session',
+    populate: { path: 'creator', populate: { path: 'user', select: 'name' } },
+  });
   if (!booking) throw ApiError.notFound('Booking not found');
   if (!booking.user.equals(req.user._id)) throw ApiError.forbidden('This booking does not belong to you');
 
   booking.status = BOOKING_STATUS.CANCELLED;
   await booking.save();
+
+  if (req.user.email && booking.session) {
+    sendSessionCancelledEmail({
+      to: req.user.email,
+      name: req.user.name,
+      sessionTitle: booking.session.title,
+      scheduledAt: booking.session.scheduledAt,
+      otherPartyName: booking.session.creator?.user?.name || 'the creator',
+    });
+  }
 
   return new ApiResponse(200, null, 'Booking cancelled').send(res);
 });
