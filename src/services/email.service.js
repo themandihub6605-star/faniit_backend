@@ -16,7 +16,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const FROM_ADDRESS = 'support@fanitt.com';
+const FROM_ADDRESS = 'info@fanitt.com';
 const FROM_NAME = 'Fanitt';
 
 function formatRupees(paise) {
