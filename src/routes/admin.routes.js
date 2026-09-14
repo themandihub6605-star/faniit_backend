@@ -63,6 +63,9 @@ router.get('/disputes/escrow', admin.listDisputedEscrows);
 router.post('/escrow/:campaignId/release', admin.adminReleaseEscrow);
 router.post('/escrow/:campaignId/refund', admin.adminRefundEscrow);
 
+// Milestones — platform-wide status tracking (NEW)
+router.get('/milestones', admin.listAllMilestones);
+
 // Analytics
 router.get('/analytics/overview', admin.getAnalyticsOverview);
 

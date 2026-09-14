@@ -14,6 +14,7 @@ const {
   Notification,
   SubscriptionPlan,
   UserSubscription,
+  Milestone,
 } = require('../models');
 const escrowService = require('../services/escrow.service');
 const subscriptionService = require('../services/subscription.service');
@@ -87,12 +88,6 @@ const listPendingVerifications = catchAsync(async (req, res) => {
   return new ApiResponse(200, { pendingCreators, pendingBrands }, 'Pending verifications fetched').send(res);
 });
 
-// Point-Fix: populate('user') added so we have the email/name to send the
-// approval/rejection email — the update itself doesn't need it, only the
-// email does. Email send is fire-and-forget (not awaited into the
-// response) and wrapped so a failed send never blocks or fails the
-// actual approval action — see email.service.js's own try/catch too, this
-// is defense in depth.
 const verifyCreator = catchAsync(async (req, res) => {
   const { decision, rejectionReason } = req.body; // 'verified' | 'rejected'
   const creator = await CreatorProfile.findByIdAndUpdate(req.params.id, { verificationStatus: decision }, { new: true }).populate('user', 'name email');
@@ -127,12 +122,6 @@ const verifyBrand = catchAsync(async (req, res) => {
 
 // ---------- Agency approval ----------
 
-/**
- * POST /api/admin/agencies — Admin creates an Agency account directly
- * (name, email, temporary password, commission rate). No self-registration
- * involved; the agency logs in with these credentials on the separate
- * Agency Panel and is expected to change the password after first login.
- */
 const createAgency = catchAsync(async (req, res) => {
   const { agencyName, ownerName, email, password, mobile, city, state, commissionPercent } = req.body;
 
@@ -162,8 +151,6 @@ const createAgency = catchAsync(async (req, res) => {
     state: state || '',
     commissionPercent: commissionPercent !== undefined ? commissionPercent : 5,
     referralCode: generateSlug(agencyName).toUpperCase(),
-    // Admin created this directly, so it's already trusted — no pending
-    // approval step needed like the self-registration flow has.
     verificationStatus: VERIFICATION_STATUS.VERIFIED,
   });
 
@@ -175,8 +162,7 @@ const createAgency = catchAsync(async (req, res) => {
 });
 
 const listAgencies = catchAsync(async (req, res) => {
-  const { status } = req.query; // 'pending' | 'verified' | 'rejected' | 'unverified' | omitted = all
-  const { AgencyProfile } = require('../models');
+  const { status } = req.query;
   const filter = {};
   if (status) filter.verificationStatus = status;
 
@@ -184,13 +170,6 @@ const listAgencies = catchAsync(async (req, res) => {
   return new ApiResponse(200, agencies, 'Agencies fetched').send(res);
 });
 
-/**
- * PATCH /api/admin/agencies/:id/set-password — the agency already exists
- * (they registered on the main website via Google and got approved there);
- * Google sign-ups don't have a password, so this is how Admin assigns one
- * for logging into the separate Agency Panel. Admin then shares the
- * agency's existing email + this new password with them.
- */
 const setAgencyPassword = catchAsync(async (req, res) => {
   const { password } = req.body;
   if (!password || password.length < 8) throw ApiError.badRequest('Password must be at least 8 characters');
@@ -199,7 +178,7 @@ const setAgencyPassword = catchAsync(async (req, res) => {
   if (!agency) throw ApiError.notFound('Agency not found');
   if (!agency.user) throw ApiError.notFound('This agency has no linked user account');
 
-  agency.user.password = password; // pre-save hook hashes it
+  agency.user.password = password;
   await agency.user.save();
 
   return new ApiResponse(
@@ -209,11 +188,8 @@ const setAgencyPassword = catchAsync(async (req, res) => {
   ).send(res);
 });
 
-// Point-Fix: populate('user') added for the approval/rejection email — same
-// pattern as verifyCreator/verifyBrand above.
 const verifyAgency = catchAsync(async (req, res) => {
-  const { decision, rejectionReason } = req.body; // decision: 'verified' | 'rejected'
-  const { AgencyProfile } = require('../models');
+  const { decision, rejectionReason } = req.body;
 
   const agency = await AgencyProfile.findByIdAndUpdate(
     req.params.id,
@@ -293,16 +269,62 @@ const listDisputedEscrows = catchAsync(async (req, res) => {
   return new ApiResponse(200, disputed, 'Disputed campaigns fetched').send(res);
 });
 
-/** Admin manually releases escrow — e.g. dispute resolved in the creator's favor */
 const adminReleaseEscrow = catchAsync(async (req, res) => {
   const transaction = await escrowService.releaseEscrow({ campaignId: req.params.campaignId, releasedByUserId: req.user._id });
   return new ApiResponse(200, transaction, 'Escrow released by admin').send(res);
 });
 
-/** Admin manually refunds escrow — e.g. dispute resolved in the brand's favor */
 const adminRefundEscrow = catchAsync(async (req, res) => {
   const transaction = await escrowService.refundEscrow({ campaignId: req.params.campaignId, refundedByUserId: req.user._id });
   return new ApiResponse(200, transaction, 'Escrow refunded by admin').send(res);
+});
+
+// ---------- Milestones (NEW) — Point-Fix: no admin-wide view of milestone
+// status existed anywhere before this; only per-campaign detail (brand
+// side) and per-dispute detail (AdminEscrowDisputes) were visible. This
+// gives Admin a single list of every milestone platform-wide, with a
+// status breakdown, so "how many are funded / awaiting review / stuck"
+// is answerable without opening every campaign one by one. ----------
+
+/** GET /api/admin/milestones?status=... — every milestone across every
+ * campaign, newest first, with enough brand/creator/campaign context to
+ * be useful without extra lookups. Also returns a count-by-status summary
+ * (computed independently of the `status` filter, so the tab badges
+ * always show the platform-wide totals even while one tab is filtered). */
+const listAllMilestones = catchAsync(async (req, res) => {
+  const { status, page = 1, limit = 50 } = req.query;
+  const filter = {};
+  if (status) filter.status = status;
+
+  const [milestones, total, statusCounts] = await Promise.all([
+    Milestone.find(filter)
+      .populate({
+        path: 'campaign',
+        select: 'title brand',
+        populate: { path: 'brand', select: 'companyName user', populate: { path: 'user', select: 'name email' } },
+      })
+      .populate({
+        path: 'creator',
+        select: 'slug user',
+        populate: { path: 'user', select: 'name email' },
+      })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(Number(limit)),
+    Milestone.countDocuments(filter),
+    Milestone.aggregate([{ $group: { _id: '$status', count: { $sum: 1 } } }]),
+  ]);
+
+  const countsByStatus = statusCounts.reduce((acc, c) => {
+    acc[c._id] = c.count;
+    return acc;
+  }, {});
+
+  return new ApiResponse(
+    200,
+    { milestones, total, page: Number(page), pages: Math.ceil(total / limit), countsByStatus },
+    'Milestones fetched'
+  ).send(res);
 });
 
 // ---------- Analytics ----------
@@ -409,10 +431,7 @@ const updateReferralConfig = catchAsync(async (req, res) => {
   return new ApiResponse(200, config, 'Referral config updated').send(res);
 });
 
-
 // ---------- Withdrawal requests ----------
-// Status flow: initiated -> processing -> completed
-//                                       -> rejected (refunds `amount` in full)
 
 const listWithdrawals = catchAsync(async (req, res) => {
   const { status } = req.query;
@@ -421,9 +440,6 @@ const listWithdrawals = catchAsync(async (req, res) => {
   return new ApiResponse(200, withdrawals, 'Withdrawals fetched').send(res);
 });
 
-/** Marks an initiated withdrawal as "processing" — Admin has picked it up
- * and is in the middle of sending the payout, but hasn't confirmed it
- * landed yet. Purely a status/visibility step; no money moves here. */
 const markWithdrawalProcessing = catchAsync(async (req, res) => {
   const withdrawal = await Withdrawal.findById(req.params.id);
   if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
@@ -436,9 +452,6 @@ const markWithdrawalProcessing = catchAsync(async (req, res) => {
   return new ApiResponse(200, withdrawal, 'Withdrawal marked as processing').send(res);
 });
 
-/** Marks a withdrawal as completed — money was already deducted from the
- * wallet when the user requested it, so this is just a status change once
- * Admin has actually sent the net payout via UPI/bank transfer outside the app. */
 const markWithdrawalPaid = catchAsync(async (req, res) => {
   const withdrawal = await Withdrawal.findById(req.params.id).populate('user', 'name email');
   if (!withdrawal) throw ApiError.notFound('Withdrawal not found');
@@ -463,9 +476,6 @@ const markWithdrawalPaid = catchAsync(async (req, res) => {
   return new ApiResponse(200, withdrawal, 'Withdrawal marked as completed').send(res);
 });
 
-/** Rejects a withdrawal and refunds the FULL requested (gross) amount back
- * to the user's wallet — since `amount` (not netPayoutAmount) was what was
- * deducted on request, refunding `amount` reverses it exactly. */
 const rejectWithdrawal = catchAsync(async (req, res) => {
   const { reason } = req.body;
   const withdrawal = await Withdrawal.findById(req.params.id).populate('user', 'name email');
@@ -493,6 +503,7 @@ const rejectWithdrawal = catchAsync(async (req, res) => {
 
   return new ApiResponse(200, withdrawal, 'Withdrawal rejected and refunded to wallet').send(res);
 });
+
 // ---------- Site settings ----------
 
 const getSiteSettings = catchAsync(async (req, res) => {
@@ -514,12 +525,9 @@ const updateSiteSettings = catchAsync(async (req, res) => {
   await settings.save();
   return new ApiResponse(200, settings, 'Site settings updated').send(res);
 });
+
 // ---------- Broadcast notifications ----------
 
-/** Sends the same notification to many users at once — either everyone, or
- * everyone with a given role. Inserts one Notification doc per recipient so
- * each person's unread count / notification list works exactly like any
- * other notification (no special-casing needed on the read side). */
 const broadcastNotification = catchAsync(async (req, res) => {
   const { title, message, role } = req.body;
   if (!title || !message) throw ApiError.badRequest('title and message are required');
@@ -541,8 +549,6 @@ const listAdmins = catchAsync(async (req, res) => {
   return new ApiResponse(200, admins, 'Admins fetched').send(res);
 });
 
-/** POST /api/admin/admins — an existing Admin creates another one directly.
- * Same "provision, then share credentials" pattern as Agency accounts. */
 const createAdmin = catchAsync(async (req, res) => {
   const { name, email, password } = req.body;
   if (!name || !email || !password) throw ApiError.badRequest('name, email and password are required');
@@ -557,9 +563,6 @@ const createAdmin = catchAsync(async (req, res) => {
 
 // ---------- Subscription plans (Creator Lite/Pro, Brand Lite/Pro/Elite) ----------
 
-/** GET /api/admin/subscription-plans?appliesTo=creator|brand — unlike the
- * public listPlans endpoint, this returns inactive plans too, so Admin can
- * re-enable a retired plan without recreating it from scratch. */
 const listSubscriptionPlansAdmin = catchAsync(async (req, res) => {
   const { appliesTo } = req.query;
   const filter = {};
@@ -576,16 +579,12 @@ const createSubscriptionPlan = catchAsync(async (req, res) => {
   const existing = await SubscriptionPlan.findOne({ slug });
   if (existing) throw ApiError.conflict('A plan with this slug already exists');
 
-  // Exactly one default plan per role — if this one is being made default,
-  // unset the flag on whichever plan currently holds it.
   if (isDefault) {
     await SubscriptionPlan.updateMany({ appliesTo, isDefault: true }, { isDefault: false });
   }
 
   const plan = await SubscriptionPlan.create(req.body);
 
-  // Paid plans get their Razorpay Plan object created immediately so the
-  // pricing page never has to wait on that at checkout time.
   if (plan.price > 0) await subscriptionService.ensureRazorpayPlan(plan);
 
   return new ApiResponse(201, plan, 'Subscription plan created').send(res);
@@ -599,11 +598,6 @@ const updateSubscriptionPlan = catchAsync(async (req, res) => {
     await SubscriptionPlan.updateMany({ appliesTo: plan.appliesTo, isDefault: true }, { isDefault: false });
   }
 
-  // Razorpay plans are immutable — if price or billing cycle is changing on
-  // a plan that already has one, drop the old id so the next checkout
-  // creates a fresh Razorpay plan. Existing subscribers keep renewing on
-  // their original Razorpay plan/price until their own cycle rolls over
-  // onto whatever plan they're moved to — this only affects NEW checkouts.
   const priceChanging = req.body.price !== undefined && req.body.price !== plan.price;
   const cycleChanging = req.body.billingCycle !== undefined && req.body.billingCycle !== plan.billingCycle;
   if ((priceChanging || cycleChanging) && plan.razorpayPlanId) {
@@ -640,9 +634,6 @@ const updateSubscriptionPlan = catchAsync(async (req, res) => {
   return new ApiResponse(200, plan, 'Subscription plan updated').send(res);
 });
 
-/** Soft-deletes a plan (isActive: false) rather than removing it — existing
- * UserSubscription docs still reference it by id, and deleting the plan
- * document out from under them would break their `.populate('plan')`. */
 const deleteSubscriptionPlan = catchAsync(async (req, res) => {
   const plan = await SubscriptionPlan.findByIdAndUpdate(req.params.id, { isActive: false }, { new: true });
   if (!plan) throw ApiError.notFound('Subscription plan not found');
@@ -657,9 +648,6 @@ const getUserSubscription = catchAsync(async (req, res) => {
   return new ApiResponse(200, sub, 'User subscription fetched').send(res);
 });
 
-/** PATCH /api/admin/users/:id/subscription — manually move a user onto a
- * different plan (e.g. comp'ing a Pro plan, or resolving a support issue),
- * bypassing Razorpay entirely. Optionally extend the current period. */
 const setUserSubscription = catchAsync(async (req, res) => {
   const { planId, periodDays } = req.body;
   if (!planId) throw ApiError.badRequest('planId is required');
@@ -689,9 +677,6 @@ const setUserSubscription = catchAsync(async (req, res) => {
   sub.currentPeriodEnd = periodEnd;
   sub.proposalsUsedThisCycle = 0;
   sub.campaignsPostedThisCycle = 0;
-  // An admin-assigned plan isn't billed through Razorpay — clear any old
-  // link so cancel/renewal logic doesn't try to touch a Razorpay subscription
-  // this override didn't create.
   sub.razorpaySubscriptionId = '';
   sub.cancelAtPeriodEnd = false;
   await sub.save();
@@ -714,7 +699,7 @@ module.exports = {
   getReferralConfig,
   updateReferralConfig,
   listWithdrawals,
-   markWithdrawalProcessing, 
+  markWithdrawalProcessing,
   markWithdrawalPaid,
   rejectWithdrawal,
   getSiteSettings,
@@ -729,6 +714,7 @@ module.exports = {
   listDisputedEscrows,
   adminReleaseEscrow,
   adminRefundEscrow,
+  listAllMilestones,
   getAnalyticsOverview,
   listCategoriesAdmin,
   createCategory,
