@@ -15,6 +15,7 @@ const {
   SubscriptionPlan,
   UserSubscription,
   Milestone,
+  Post,
 } = require('../models');
 const escrowService = require('../services/escrow.service');
 const subscriptionService = require('../services/subscription.service');
@@ -48,9 +49,20 @@ const getUserDetail = catchAsync(async (req, res) => {
   if (!user) throw ApiError.notFound('User not found');
 
   let roleProfile = null;
-  if (user.role === ROLES.CREATOR) roleProfile = await CreatorProfile.findOne({ user: user._id }).populate('category', 'label');
-  else if (user.role === ROLES.BRAND) roleProfile = await BrandProfile.findOne({ user: user._id });
-  else if (user.role === ROLES.AGENCY) roleProfile = await AgencyProfile.findOne({ user: user._id });
+  let posts = [];
+  if (user.role === ROLES.CREATOR) {
+    roleProfile = await CreatorProfile.findOne({ user: user._id }).populate('category', 'label');
+    // Point-Fix: was never fetched, so the admin User Detail page had no
+    // way to show a creator's posts at all — Bug 2 in the current fix
+    // round. Only queried for creators, since only they have posts.
+    if (roleProfile) {
+      posts = await Post.find({ creator: roleProfile._id }).sort({ createdAt: -1 });
+    }
+  } else if (user.role === ROLES.BRAND) {
+    roleProfile = await BrandProfile.findOne({ user: user._id });
+  } else if (user.role === ROLES.AGENCY) {
+    roleProfile = await AgencyProfile.findOne({ user: user._id });
+  }
 
   const [transactions, reviews, referredCount] = await Promise.all([
     Transaction.find({ $or: [{ from: user._id }, { to: user._id }] }).sort({ createdAt: -1 }).limit(20),
@@ -60,7 +72,7 @@ const getUserDetail = catchAsync(async (req, res) => {
 
   return new ApiResponse(
     200,
-    { user, roleProfile, transactions, reviews, referredCount },
+    { user, roleProfile, posts, transactions, reviews, referredCount },
     'User detail fetched'
   ).send(res);
 });
