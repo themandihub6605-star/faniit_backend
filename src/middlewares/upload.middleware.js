@@ -2,7 +2,17 @@ const multer = require('multer');
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
 const cloudinary = require('../config/cloudinary');
 
-const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const ALLOWED_IMAGE_TYPES = [
+  'image/jpeg',
+  'image/jpg', // non-standard but some browsers/OSes send this for .jpg
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/heic', // iPhone camera default format
+  'image/heif',
+  'image/avif',
+  'image/bmp',
+];
 const ALLOWED_VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
 // Milestone submissions / change requests / dispute evidence — documents in
 // addition to whatever images/videos are attached, so a creator can hand
