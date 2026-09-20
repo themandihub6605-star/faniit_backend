@@ -41,6 +41,7 @@ const brandProfileSchema = new mongoose.Schema(
       enum: Object.values(VERIFICATION_STATUS),
       default: VERIFICATION_STATUS.UNVERIFIED,
     },
+    rejectionReason: { type: String, default: '' },
 
     totalCampaigns: { type: Number, default: 0 },
     totalSpent: { type: Number, default: 0 },

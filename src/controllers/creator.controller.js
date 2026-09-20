@@ -128,8 +128,9 @@ const updateMyProfile = catchAsync(async (req, res) => {
   if (yearsOfExperience !== undefined) creator.yearsOfExperience = yearsOfExperience;
   if (portfolioLink !== undefined) creator.portfolioLink = portfolioLink;
 
-  if (submitForApproval && creator.verificationStatus === VERIFICATION_STATUS.UNVERIFIED) {
+  if (submitForApproval && [VERIFICATION_STATUS.UNVERIFIED, VERIFICATION_STATUS.REJECTED].includes(creator.verificationStatus)) {
     creator.verificationStatus = VERIFICATION_STATUS.PENDING;
+    creator.rejectionReason = '';
   }
 
   await creator.save();

@@ -141,8 +141,9 @@ const updateMyProfile = catchAsync(async (req, res) => {
   if (targetAudience !== undefined) brand.targetAudience = targetAudience;
   if (contactDesignation !== undefined) brand.contactDesignation = contactDesignation;
 
-  if (submitForApproval && brand.verificationStatus === VERIFICATION_STATUS.UNVERIFIED) {
+  if (submitForApproval && [VERIFICATION_STATUS.UNVERIFIED, VERIFICATION_STATUS.REJECTED].includes(brand.verificationStatus)) {
     brand.verificationStatus = VERIFICATION_STATUS.PENDING;
+    brand.rejectionReason = '';
   }
 
   await brand.save();

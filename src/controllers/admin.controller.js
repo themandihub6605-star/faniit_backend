@@ -94,15 +94,21 @@ const reinstateUser = catchAsync(async (req, res) => {
 // ---------- Creator / Brand verification ----------
 
 const listPendingVerifications = catchAsync(async (req, res) => {
-  const pendingCreators = await CreatorProfile.find({ verificationStatus: VERIFICATION_STATUS.PENDING }).populate('user', 'name email avatarUrl');
-  const pendingBrands = await BrandProfile.find({ verificationStatus: VERIFICATION_STATUS.PENDING }).populate('user', 'name email avatarUrl');
+  const pendingCreators = await CreatorProfile.find({ verificationStatus: VERIFICATION_STATUS.PENDING })
+    .populate('user', 'name email phone avatarUrl')
+    .populate('category', 'label');
+  const pendingBrands = await BrandProfile.find({ verificationStatus: VERIFICATION_STATUS.PENDING }).populate('user', 'name email phone avatarUrl');
 
   return new ApiResponse(200, { pendingCreators, pendingBrands }, 'Pending verifications fetched').send(res);
 });
 
 const verifyCreator = catchAsync(async (req, res) => {
   const { decision, rejectionReason } = req.body; // 'verified' | 'rejected'
-  const creator = await CreatorProfile.findByIdAndUpdate(req.params.id, { verificationStatus: decision }, { new: true }).populate('user', 'name email');
+  const creator = await CreatorProfile.findByIdAndUpdate(
+    req.params.id,
+    { verificationStatus: decision, rejectionReason: decision === 'rejected' ? rejectionReason || '' : '' },
+    { new: true }
+  ).populate('user', 'name email');
   if (!creator) throw ApiError.notFound('Creator not found');
 
   if (creator.user?.email) {
@@ -118,7 +124,11 @@ const verifyCreator = catchAsync(async (req, res) => {
 
 const verifyBrand = catchAsync(async (req, res) => {
   const { decision, rejectionReason } = req.body;
-  const brand = await BrandProfile.findByIdAndUpdate(req.params.id, { verificationStatus: decision }, { new: true }).populate('user', 'name email');
+  const brand = await BrandProfile.findByIdAndUpdate(
+    req.params.id,
+    { verificationStatus: decision, rejectionReason: decision === 'rejected' ? rejectionReason || '' : '' },
+    { new: true }
+  ).populate('user', 'name email');
   if (!brand) throw ApiError.notFound('Brand not found');
 
   if (brand.user?.email) {

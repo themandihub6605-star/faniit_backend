@@ -62,7 +62,7 @@ const register = catchAsync(async (req, res) => {
 
   const accessToken = issueTokens(res, user);
   const profileStatus = await getProfileStatus(user);
-  return new ApiResponse(201, { user: user.toSafeObject(), accessToken, profileStatus }, 'Account created successfully').send(res);
+  return new ApiResponse(201, { user: { ...user.toSafeObject(), profileStatus }, accessToken, profileStatus }, 'Account created successfully').send(res);
 });
 
 const login = catchAsync(async (req, res) => {
@@ -79,7 +79,7 @@ const login = catchAsync(async (req, res) => {
 
   const accessToken = issueTokens(res, user);
   const profileStatus = await getProfileStatus(user);
-  return new ApiResponse(200, { user: user.toSafeObject(), accessToken, profileStatus }, 'Logged in successfully').send(res);
+  return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, profileStatus }, 'Logged in successfully').send(res);
 });
 
 const refresh = catchAsync(async (req, res) => {
@@ -247,7 +247,7 @@ const googleAuth = catchAsync(async (req, res) => {
   const accessToken = issueTokens(res, user);
   const profileStatus = await getProfileStatus(user);
   console.log('[google-auth backend] SUCCESS — issuing tokens for user:', user.email, ', role:', user.role);
-  return new ApiResponse(200, { user: user.toSafeObject(), accessToken, isNewUser, profileStatus }, 'Signed in with Google').send(res);
+  return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, isNewUser, profileStatus }, 'Signed in with Google').send(res);
 });
 
 module.exports = { register, login, refresh, logout, getMe, forgotPassword, resetPassword, googleAuth, upgradeRole, completeOnboarding };

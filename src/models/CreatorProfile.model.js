@@ -45,6 +45,7 @@ const creatorProfileSchema = new mongoose.Schema(
       enum: Object.values(VERIFICATION_STATUS),
       default: VERIFICATION_STATUS.UNVERIFIED,
     },
+    rejectionReason: { type: String, default: '' },
 
     // earnings snapshot, recalculated by walletService on each transaction
     totalEarnings: { type: Number, default: 0 },

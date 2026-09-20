@@ -36,8 +36,9 @@ const updateMyProfile = catchAsync(async (req, res) => {
   if (yearsInBusiness !== undefined) agency.yearsInBusiness = yearsInBusiness;
   if (specialization !== undefined) agency.specialization = specialization;
 
-  if (submitForApproval && agency.verificationStatus === VERIFICATION_STATUS.UNVERIFIED) {
+  if (submitForApproval && [VERIFICATION_STATUS.UNVERIFIED, VERIFICATION_STATUS.REJECTED].includes(agency.verificationStatus)) {
     agency.verificationStatus = VERIFICATION_STATUS.PENDING;
+    agency.rejectionReason = '';
   }
 
   await agency.save();
