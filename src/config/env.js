@@ -47,4 +47,24 @@ module.exports = {
     apiKey: process.env.CLOUDINARY_API_KEY,
     apiSecret: process.env.CLOUDINARY_API_SECRET,
   },
+
+  // Media storage — replacing Cloudinary. Images/documents go to R2
+  // (S3-compatible object storage, zero egress fees), video goes to
+  // Cloudflare Stream (handles transcoding/playback the way Cloudinary's
+  // video pipeline did).
+  cloudflare: {
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+    // R2 (images/documents) — from R2 > Manage API Tokens in the dashboard
+    r2: {
+      accessKeyId: process.env.R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      bucketName: process.env.R2_BUCKET_NAME,
+      // The bucket's public base URL — either the free *.r2.dev URL
+      // (enable "Public Access" on the bucket to get one) or your own
+      // custom domain connected to the bucket. No trailing slash.
+      publicUrl: process.env.R2_PUBLIC_URL,
+    },
+    // Stream (video) — API Tokens page, needs Stream:Edit permission
+    streamApiToken: process.env.CLOUDFLARE_STREAM_API_TOKEN,
+  },
 };

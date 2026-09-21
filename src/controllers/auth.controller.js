@@ -2,12 +2,27 @@ const crypto = require('crypto');
 const { User, CreatorProfile, BrandProfile, AgencyProfile } = require('../models');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/generateToken');
 const generateSlug = require('../utils/slugify');
+const generateReferralCode = require('../utils/generateReferralCode');
 const catchAsync = require('../utils/catchAsync');
 const ApiError = require('../utils/apiError');
 const ApiResponse = require('../utils/apiResponse');
 const { ROLES } = require('../constants/enums');
 const { resolveReferrer } = require('../services/referral.service');
 const { sendPasswordResetEmail } = require('../services/email.service');
+
+// Agencies used to get a name-derived referral code (e.g. "PRABHANSH4342")
+// via generateSlug(name).toUpperCase() — inconsistent with every other
+// referral code in the app, which is a clean random 6-character code
+// (see utils/generateReferralCode.js, already used by User.model.js's
+// own pre-save hook). This mirrors that same collision-check pattern for
+// AgencyProfile's separately-indexed referralCode field.
+async function generateUniqueAgencyReferralCode() {
+  let attempt = generateReferralCode();
+  while (await AgencyProfile.exists({ referralCode: attempt })) {
+    attempt = generateReferralCode();
+  }
+  return attempt;
+}
 
 function issueTokens(res, user) {
   const accessToken = generateAccessToken(user._id, user.role);
@@ -57,7 +72,7 @@ const register = catchAsync(async (req, res) => {
   } else if (role === ROLES.BRAND) {
     await BrandProfile.create({ user: user._id, companyName: name, slug: generateSlug(name) });
   } else if (role === ROLES.AGENCY) {
-    await AgencyProfile.create({ user: user._id, agencyName: name, referralCode: generateSlug(name).toUpperCase() });
+    await AgencyProfile.create({ user: user._id, agencyName: name, referralCode: await generateUniqueAgencyReferralCode() });
   }
 
   const accessToken = issueTokens(res, user);
@@ -170,7 +185,7 @@ const upgradeRole = catchAsync(async (req, res) => {
   } else if (role === ROLES.BRAND && !(await BrandProfile.findOne({ user: user._id }))) {
     await BrandProfile.create({ user: user._id, companyName: name || user.name, slug: generateSlug(name || user.name) });
   } else if (role === ROLES.AGENCY && !(await AgencyProfile.findOne({ user: user._id }))) {
-    await AgencyProfile.create({ user: user._id, agencyName: name || user.name, referralCode: generateSlug(name || user.name).toUpperCase() });
+    await AgencyProfile.create({ user: user._id, agencyName: name || user.name, referralCode: await generateUniqueAgencyReferralCode() });
   }
 
   const profileStatus = await getProfileStatus(user);
@@ -240,7 +255,7 @@ const googleAuth = catchAsync(async (req, res) => {
     } else if (role === ROLES.BRAND) {
       await BrandProfile.create({ user: user._id, companyName: finalName, slug: generateSlug(finalName) });
     } else if (role === ROLES.AGENCY) {
-      await AgencyProfile.create({ user: user._id, agencyName: finalName, referralCode: generateSlug(finalName).toUpperCase() });
+      await AgencyProfile.create({ user: user._id, agencyName: finalName, referralCode: await generateUniqueAgencyReferralCode() });
     }
   }
 

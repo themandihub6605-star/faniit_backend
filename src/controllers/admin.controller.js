@@ -21,10 +21,23 @@ const escrowService = require('../services/escrow.service');
 const subscriptionService = require('../services/subscription.service');
 const { sendAccountApprovedEmail, sendAccountRejectedEmail, sendWithdrawalCompletedEmail, sendWithdrawalRejectedEmail } = require('../services/email.service');
 const generateSlug = require('../utils/slugify');
+const generateReferralCode = require('../utils/generateReferralCode');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { VERIFICATION_STATUS, TRANSACTION_STATUS, ROLES, SUBSCRIPTION_STATUS } = require('../constants/enums');
+
+// Same helper as auth.controller.js's generateUniqueAgencyReferralCode —
+// admin's manual agency-creation flow had its own separate (and much
+// longer, name-derived) referral code generator; this makes it consistent
+// with every other referral code in the app.
+async function generateUniqueAgencyReferralCode() {
+  let attempt = generateReferralCode();
+  while (await AgencyProfile.exists({ referralCode: attempt })) {
+    attempt = generateReferralCode();
+  }
+  return attempt;
+}
 
 // ---------- Users ----------
 
@@ -172,7 +185,7 @@ const createAgency = catchAsync(async (req, res) => {
     city: city || '',
     state: state || '',
     commissionPercent: commissionPercent !== undefined ? commissionPercent : 5,
-    referralCode: generateSlug(agencyName).toUpperCase(),
+    referralCode: await generateUniqueAgencyReferralCode(),
     verificationStatus: VERIFICATION_STATUS.VERIFIED,
   });
 

@@ -1,4 +1,4 @@
-const { BrandProfile, Campaign, Transaction, UserSubscription } = require('../models');
+const { BrandProfile, Campaign, Transaction, UserSubscription, User } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -56,6 +56,14 @@ const uploadLogo = catchAsync(async (req, res) => {
 
   const brand = await BrandProfile.findOneAndUpdate({ user: req.user._id }, { logoUrl }, { new: true });
   if (!brand) throw ApiError.notFound('Brand profile not found');
+
+  // Keep the platform-wide avatar (navbar, post composer, comments — every
+  // place that shows "the logged-in user", not just their brand profile)
+  // in sync with the logo. Creators already get this for free because
+  // their own avatar upload writes straight to User.avatarUrl; brands
+  // never did until now, which is why a brand's logo showed correctly on
+  // their own profile/dashboard but not in the navbar or feed composer.
+  await User.findByIdAndUpdate(req.user._id, { avatarUrl: logoUrl });
 
   return new ApiResponse(200, { logoUrl }, 'Logo uploaded').send(res);
 });
