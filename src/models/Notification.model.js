@@ -24,6 +24,11 @@ const NOTIFICATION_TYPES = [
   'milestone_changes_requested',
   'dispute_raised',
   'dispute_refund',
+  // FanBox gifts (gift.controller.js) — same class of miss as the
+  // milestone ones above: notificationService.notify() with a type not
+  // in this list throws and aborts the whole request, not just the
+  // notification.
+  'gift_received',
 ];
 
 const notificationSchema = new mongoose.Schema(
