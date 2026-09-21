@@ -1,5 +1,7 @@
 const multer = require('multer');
 const sharp = require('sharp');
+const axios = require('axios');
+const FormData = require('form-data');
 const { PutObjectCommand } = require('@aws-sdk/client-s3');
 const { randomUUID } = require('crypto');
 const r2Client = require('../config/r2');
@@ -82,20 +84,32 @@ async function uploadBufferToR2(buffer, mimetype, folder) {
  * Cloudflare Stream's one-shot upload endpoint — takes a video buffer,
  * returns transcoding + playback info. Ingress and encoding are free;
  * you only pay for minutes stored and minutes delivered.
+ *
+ * Uses axios + the `form-data` package rather than Node's built-in
+ * fetch/FormData/Blob — those only exist on Node 18+, and a production
+ * server on an older Node version would otherwise fail here with no
+ * clear error (the request just never completes, which the browser
+ * reports as a misleading CORS failure). axios + form-data work on any
+ * Node version this project is likely to run on.
  */
 async function uploadBufferToStream(buffer, filename, mimetype) {
   const form = new FormData();
-  form.append('file', new Blob([buffer], { type: mimetype }), filename);
+  form.append('file', buffer, { filename, contentType: mimetype });
 
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${env.cloudflare.accountId}/stream`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env.cloudflare.streamApiToken}` },
-    body: form,
-  });
-  const data = await res.json();
-  if (!res.ok || !data.success) {
-    const message = data?.errors?.[0]?.message || 'Cloudflare Stream upload failed';
+  let data;
+  try {
+    const res = await axios.post(`https://api.cloudflare.com/client/v4/accounts/${env.cloudflare.accountId}/stream`, form, {
+      headers: { ...form.getHeaders(), Authorization: `Bearer ${env.cloudflare.streamApiToken}` },
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+    data = res.data;
+  } catch (err) {
+    const message = err.response?.data?.errors?.[0]?.message || err.message || 'Cloudflare Stream upload failed';
     throw new Error(message);
+  }
+  if (!data.success) {
+    throw new Error(data?.errors?.[0]?.message || 'Cloudflare Stream upload failed');
   }
   // .hls is the adaptive-bitrate playback URL — this is what you'd put in
   // a <video> tag / player, same role campaignImageUrl-style fields play
