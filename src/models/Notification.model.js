@@ -14,34 +14,27 @@ const NOTIFICATION_TYPES = [
   'payout_released',
   'account_verified',
   'general',
-  // Point 12 (Upwork-style milestone escrow) — added when milestone
-  // funding/submission/dispute notifications started being sent from
-  // milestone.service.js / dispute.service.js; missing entries here
-  // made notificationService.notify(...) throw a Mongoose validation
-  // error and silently abort the whole request that triggered it.
   'milestone_funded',
   'milestone_submitted',
   'milestone_changes_requested',
   'dispute_raised',
   'dispute_refund',
-  // FanBox gifts (gift.controller.js) — same class of miss as the
-  // milestone ones above: notificationService.notify() with a type not
-  // in this list throws and aborts the whole request, not just the
-  // notification.
   'gift_received',
+  'like',
+  'follow',
 ];
+
+const RELATED_MODELS = ['Post', 'User', 'Session', 'Milestone', 'Dispute', 'Gift', 'Proposal', 'Campaign', 'Collaboration'];
 
 const notificationSchema = new mongoose.Schema(
   {
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     type: { type: String, enum: NOTIFICATION_TYPES, default: 'general' },
-
+    fromUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     title: { type: String, required: true },
     message: { type: String, required: true },
-
-    relatedModel: { type: String, default: null },
-    relatedId: { type: mongoose.Schema.Types.ObjectId, default: null },
-
+    relatedModel: { type: String, enum: RELATED_MODELS, default: null },
+    relatedId: { type: mongoose.Schema.Types.ObjectId, refPath: 'relatedModel', default: null },
     isRead: { type: Boolean, default: false },
   },
   { timestamps: true }

@@ -1,4 +1,4 @@
-const { User, Transaction } = require('../models');
+const { User, Transaction, CreatorProfile, BrandProfile } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -59,6 +59,38 @@ const changePassword = catchAsync(async (req, res) => {
 
 /** GET /api/users/me/referrals — my own referral code, everyone I've
  * referred (any role), and my total referral commission earned so far. */
+const getMyFollowing = catchAsync(async (req, res) => {
+  const [creators, brands] = await Promise.all([
+    CreatorProfile.find({ followers: req.user._id }).select('slug title user').populate('user', 'name avatarUrl'),
+    BrandProfile.find({ followers: req.user._id }).select('slug companyName logoUrl'),
+  ]);
+
+  // A flat, mixed list — the frontend can filter/render creators and
+  // brands however it wants, and can derive the "which IDs am I
+  // following" set it needs for follow-button state from `id` here
+  // instead of needing a separate endpoint for that.
+  const following = [
+    ...creators.map((c) => ({
+      id: c._id,
+      type: 'creator',
+      slug: c.slug,
+      name: c.user?.name || 'Unknown creator',
+      avatarUrl: c.user?.avatarUrl || null,
+      subtitle: c.title || null,
+    })),
+    ...brands.map((b) => ({
+      id: b._id,
+      type: 'brand',
+      slug: b.slug,
+      name: b.companyName,
+      avatarUrl: b.logoUrl || null,
+      subtitle: null,
+    })),
+  ];
+
+  return new ApiResponse(200, following, 'Following list fetched').send(res);
+});
+
 const getMyReferrals = catchAsync(async (req, res) => {
   const [referredUsers, transactions] = await Promise.all([
     User.find({ referredBy: req.user._id }).select('name role avatarUrl createdAt'),
@@ -79,4 +111,4 @@ const getMyReferrals = catchAsync(async (req, res) => {
   ).send(res);
 });
 
-module.exports = { updateMe, updateAvatar, getUserById, deleteMe, getMyReferrals, changePassword };
+module.exports = { updateMe, updateAvatar, getUserById, deleteMe, getMyReferrals, changePassword, getMyFollowing };

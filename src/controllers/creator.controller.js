@@ -4,6 +4,8 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/enums');
 const { VERIFICATION_STATUS } = require('../constants/enums');
+const notificationService = require('../services/notification.service');
+
 const listCreators = catchAsync(async (req, res) => {
   const { category, location, minFollowers, search, page = 1, limit = 20 } = req.query;
 
@@ -15,12 +17,6 @@ const listCreators = catchAsync(async (req, res) => {
     filter.$or = [{ bio: new RegExp(search, 'i') }];
   }
 
-  // NOTE: the earlier Lite-only-sees-Lite / Pro-sees-everyone visibility
-  // filter (Point 5) has been removed per later instruction — every
-  // creator is now visible to every viewer regardless of plan tier.
-  // subscriptionService.getProTierUserIds / isViewerOnLiteTier still exist
-  // and are harmless if unused elsewhere; nothing to clean up there.
-
   const creators = await CreatorProfile.find(filter)
     .populate('user', 'name avatarUrl')
     .populate('category', 'label icon')
@@ -28,8 +24,6 @@ const listCreators = catchAsync(async (req, res) => {
     .skip((page - 1) * limit)
     .limit(Number(limit));
 
-  // Real completed-session counts for exactly the creators on this page — one
-  // aggregate query, not N+1, and not a fabricated number.
   const creatorIds = creators.map((c) => c._id);
   const completedCounts = await Session.aggregate([
     { $match: { creator: { $in: creatorIds }, isCompleted: true } },
@@ -37,24 +31,26 @@ const listCreators = catchAsync(async (req, res) => {
   ]);
   const countMap = new Map(completedCounts.map((c) => [String(c._id), c.count]));
 
-  // Plan badge info (replaces the old blue verified-tick on listing
-  // cards) — one batched query for every creator on this page rather
-  // than a per-card lookup. A creator with no UserSubscription row yet
-  // is implicitly on the free default plan, same reasoning as elsewhere
-  // in subscription.service.js — defaults to 'Lite' / not-pro.
   const userIds = creators.map((c) => c.user?._id).filter(Boolean);
   const subs = await UserSubscription.find({ user: { $in: userIds } }).populate('plan', 'name price');
   const planMap = new Map(subs.map((s) => [String(s.user), s.plan]));
 
-  const creatorsWithStats = creators.map((c) => {
-    const plan = planMap.get(String(c.user?._id));
-    return {
-      ...c.toObject(),
-      projectsCompletedCount: countMap.get(String(c._id)) || 0,
-      planName: plan ? plan.name : 'Lite',
-      isProPlan: plan ? plan.price > 0 : false,
-    };
-  });
+  const creatorsWithStats = creators
+    // Never recommend a logged-in user to follow their own creator profile.
+    .filter((c) => !(req.user && c.user?._id?.equals(req.user._id)))
+    .map((c) => {
+      const plan = planMap.get(String(c.user?._id));
+      // Tell the frontend the real follow state, instead of it starting
+      // from an empty Set and guessing purely from clicks.
+      const isFollowing = !!(req.user && c.followers.some((f) => f.equals(req.user._id)));
+      return {
+        ...c.toObject(),
+        projectsCompletedCount: countMap.get(String(c._id)) || 0,
+        planName: plan ? plan.name : 'Lite',
+        isProPlan: plan ? plan.price > 0 : false,
+        isFollowing,
+      };
+    });
 
   const total = await CreatorProfile.countDocuments(filter);
 
@@ -75,13 +71,8 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
   const sessions = await Session.find({ creator: creator._id, isCancelled: false, isCompleted: false }).sort({ scheduledAt: 1 });
   const reviews = await Review.find({ toUser: creator.user._id, isHidden: false }).sort({ createdAt: -1 }).limit(10);
 
-  // Real, computed trust metrics — not hardcoded.
   const projectsCompletedCount = await Session.countDocuments({ creator: creator._id, isCompleted: true });
 
-  // Plan badge info for this profile — same defaulting as listCreators
-  // (no UserSubscription row yet = implicitly Lite). Used by the
-  // frontend to show a Lite viewer an upgrade prompt when they open a
-  // Pro creator's profile.
   const sub = await UserSubscription.findOne({ user: creator.user._id }).populate('plan', 'name price');
   const creatorWithPlan = {
     ...creator.toObject(),
@@ -89,9 +80,11 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
     isProPlan: sub ? sub.plan.price > 0 : false,
   };
 
+  const isFollowing = !!(req.user && creator.followers.some((f) => f.equals(req.user._id)));
+
   return new ApiResponse(
     200,
-    { creator: creatorWithPlan, sessions, reviews, stats: { projectsCompletedCount } },
+    { creator: { ...creatorWithPlan, isFollowing }, sessions, reviews, stats: { projectsCompletedCount } },
     'Creator profile fetched'
   ).send(res);
 });
@@ -106,7 +99,6 @@ const getMyProfile = catchAsync(async (req, res) => {
   if (!creator) throw ApiError.notFound('Creator profile not found');
   return new ApiResponse(200, creator, 'Profile fetched').send(res);
 });
-
 
 const updateMyProfile = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can update a creator profile');
@@ -178,6 +170,8 @@ const followCreator = catchAsync(async (req, res) => {
   const creator = await CreatorProfile.findById(req.params.id);
   if (!creator) throw ApiError.notFound('Creator not found');
 
+  if (creator.user.equals(req.user._id)) throw ApiError.badRequest("You can't follow yourself");
+
   const alreadyFollowing = creator.followers.some((f) => f.equals(req.user._id));
   if (alreadyFollowing) {
     creator.followers.pull(req.user._id);
@@ -185,10 +179,20 @@ const followCreator = catchAsync(async (req, res) => {
   } else {
     creator.followers.push(req.user._id);
     creator.followerCount += 1;
+
+    await notificationService.notify({
+      userId: creator.user,
+      fromUser: req.user._id,
+      type: 'follow',
+      relatedModel: 'User',
+      relatedId: req.user._id,
+      title: 'New follower',
+      message: `${req.user.name} started following you`,
+    });
   }
   await creator.save();
 
-  return new ApiResponse(200, { following: !alreadyFollowing }, alreadyFollowing ? 'Unfollowed' : 'Followed').send(res);
+  return new ApiResponse(200, { following: !alreadyFollowing, followerCount: creator.followerCount }, alreadyFollowing ? 'Unfollowed' : 'Followed').send(res);
 });
 
 module.exports = { listCreators, getCreatorBySlug, getMyProfile, updateMyProfile, getMyDashboard, followCreator };

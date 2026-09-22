@@ -7,7 +7,12 @@ const getMyNotifications = catchAsync(async (req, res) => {
   const { unreadOnly } = req.query;
   const filter = { user: req.user._id, ...(unreadOnly === 'true' && { isRead: false }) };
 
-  const notifications = await Notification.find(filter).sort({ createdAt: -1 }).limit(50);
+  const notifications = await Notification.find(filter)
+    .populate('fromUser', 'name avatarUrl')
+    .populate('relatedId')
+    .sort({ createdAt: -1 })
+    .limit(50);
+
   const unreadCount = await Notification.countDocuments({ user: req.user._id, isRead: false });
 
   return new ApiResponse(200, { notifications, unreadCount }, 'Notifications fetched').send(res);
