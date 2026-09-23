@@ -268,6 +268,15 @@ const applyToCampaign = catchAsync(async (req, res) => {
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (campaign.status !== CAMPAIGN_STATUS.OPEN) throw ApiError.badRequest('This campaign is no longer accepting applications');
 
+  // Fix: a campaign with an assignedCreator was still technically
+  // "open" status-wise, so a brand new creator could apply (and their
+  // card would just always render "Not selected" with no way to ever
+  // be accepted) — this blocks it outright with a clear reason instead
+  // of a silent dead-end application.
+  if (campaign.assignedCreator) {
+    throw ApiError.conflict('This campaign has already been allotted to a creator.');
+  }
+
   const creatorPlan = await subscriptionService.getCreatorPlanFields(req.user._id);
 
   if (campaign.visibilityTier === CAMPAIGN_VISIBILITY_TIER.EXCLUSIVE && creatorPlan.campaignAccessTier !== CREATOR_CAMPAIGN_ACCESS.ALL) {
