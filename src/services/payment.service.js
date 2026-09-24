@@ -75,7 +75,28 @@ async function createPayout(fundAccountId, amount, referenceId) {
   };
 }
 
+/**
+ * Replay guard for every verify endpoint. A valid signature only proves the
+ * payment happened — not that it hasn't already been credited, or that the
+ * client-sent amount is real. This rejects reused order/payment ids and
+ * returns the order as Razorpay recorded it (use its `amount`).
+ */
+async function claimOrder({ razorpayOrderId, razorpayPaymentId }) {
+  const { Transaction } = require('../models');
+  const used = await Transaction.exists({
+    $or: [{ razorpayPaymentId }, { razorpayOrderId }],
+  });
+  if (used) throw ApiError.conflict('This payment has already been processed');
+
+  const order = await razorpay.orders.fetch(razorpayOrderId);
+  if (!order || order.status === 'created') {
+    throw ApiError.badRequest('This payment has not been completed');
+  }
+  return order;
+}
+
 module.exports = {
+  claimOrder,
   createOrder,
   verifyPaymentSignature,
   verifySubscriptionSignature,

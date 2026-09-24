@@ -78,6 +78,17 @@ const verifyCheckout = catchAsync(async (req, res) => {
   const plan = await SubscriptionPlan.findById(planId);
   if (!plan) throw ApiError.notFound('Plan not found');
 
+  // The plan must be the one this Razorpay subscription was created for,
+  // by this user — otherwise paying for a cheap plan could unlock any plan.
+  const rzpSubscription = await razorpay.subscriptions.fetch(razorpaySubscriptionId);
+  const notes = rzpSubscription.notes || {};
+  if (
+    rzpSubscription.plan_id !== plan.razorpayPlanId ||
+    (notes.userId && String(notes.userId) !== String(req.user._id))
+  ) {
+    throw ApiError.badRequest('This payment does not match the selected plan');
+  }
+
   let sub = await UserSubscription.findOne({ user: req.user._id });
   const periodEnd = subscriptionService.addCycle(new Date(), plan.billingCycle);
 

@@ -25,7 +25,7 @@ const protect = catchAsync(async (req, res, next) => {
   }
 
   const user = await User.findById(decoded.id);
-  if (!user) throw ApiError.unauthorized('User no longer exists');
+  if (!user || user.isActive === false) throw ApiError.unauthorized('User no longer exists');
   if (user.isSuspended) throw ApiError.forbidden('Your account has been suspended');
 
   req.user = user;

@@ -24,10 +24,13 @@ const createGiftOrder = catchAsync(async (req, res) => {
 });
 
 const verifyGift = catchAsync(async (req, res) => {
-  const { creatorId, amount, message, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  const { creatorId, message, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
 
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
+
+  // Amount comes from Razorpay, never from the client; ids can't be reused.
+  const { amount } = await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
 
   const creator = await CreatorProfile.findById(creatorId).populate('user');
   if (!creator) throw ApiError.notFound('Creator not found');

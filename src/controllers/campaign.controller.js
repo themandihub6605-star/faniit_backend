@@ -22,7 +22,8 @@ const listCampaigns = catchAsync(async (req, res) => {
 
   const filter = {};
   if (category) filter.category = category;
-  if (status) filter.status = status;
+  // Drafts are private to their brand — never list them publicly.
+  filter.status = status && status !== CAMPAIGN_STATUS.DRAFT ? status : CAMPAIGN_STATUS.OPEN;
 
   const campaigns = await Campaign.find(filter)
     .populate({ path: 'brand', populate: { path: 'user', select: 'name avatarUrl' } })
@@ -340,8 +341,10 @@ const applyToCampaign = catchAsync(async (req, res) => {
     throw err;
   }
 
+  const brandProfile = await BrandProfile.findById(campaign.brand).select('user');
   await notificationService.notify({
-    userId: campaign.brand,
+    // campaign.brand is the BrandProfile id — notify the brand's user.
+    userId: brandProfile?.user,
     type: 'proposal_received',
     title: 'New proposal received',
     message: `A creator sent a proposal for "${campaign.title}".`,
@@ -477,7 +480,11 @@ const decideApplication = catchAsync(async (req, res) => {
   }
 
   const application = await Application.findById(req.params.appId);
-  if (!application) throw ApiError.notFound('Application not found');
+  if (!application || !application.campaign.equals(campaign._id)) throw ApiError.notFound('Application not found');
+  if (application.status !== APPLICATION_STATUS.PENDING) throw ApiError.conflict('This proposal has already been answered');
+  if (decision === 'accepted' && campaign.assignedCreator) {
+    throw ApiError.conflict('A creator is already hired for this campaign');
+  }
 
   application.status = decision === 'accepted' ? APPLICATION_STATUS.ACCEPTED : APPLICATION_STATUS.REJECTED;
   application.respondedAt = new Date();
@@ -567,9 +574,11 @@ const verifyEscrowPayment = catchAsync(async (req, res) => {
   const campaign = await Campaign.findById(req.params.id).populate('brand');
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
+  if (campaign.isEscrowFunded) throw ApiError.conflict('This campaign is already funded');
 
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
+  await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
 
   await escrowService.fundEscrow({
     campaignId: campaign._id,

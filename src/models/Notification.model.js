@@ -24,7 +24,7 @@ const NOTIFICATION_TYPES = [
   'follow',
 ];
 
-const RELATED_MODELS = ['Post', 'User', 'Session', 'Milestone', 'Dispute', 'Gift', 'Proposal', 'Campaign', 'Collaboration'];
+const RELATED_MODELS = ['Post', 'User', 'Session', 'Milestone', 'Dispute', 'Gift', 'Proposal', 'Campaign', 'Collaboration', 'Conversation'];
 
 const notificationSchema = new mongoose.Schema(
   {

@@ -88,6 +88,10 @@ const verifyBookingPayment = catchAsync(async (req, res) => {
   });
   if (!booking) throw ApiError.notFound('Booking not found');
   if (!booking.user.equals(req.user._id)) throw ApiError.forbidden('This booking does not belong to you');
+  if (booking.status !== 'pending') throw ApiError.conflict('This booking is already confirmed');
+
+  const order = await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
+  if (order.amount !== booking.amountPaid) throw ApiError.badRequest('Payment amount does not match this booking');
 
   const { platformCommission, agencyCommission, referralCommission, netAmount } = await walletService.splitEarnings(
     booking.amountPaid,

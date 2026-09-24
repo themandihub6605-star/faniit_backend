@@ -36,6 +36,22 @@ const userSchema = new mongoose.Schema(
 
     isEmailVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    // Campaigns a creator bookmarked (was missing, so save/saved crashed).
+    savedCampaigns: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Campaign' }],
+
+    // Firebase Cloud Messaging device tokens (one per installed app).
+    pushTokens: {
+      type: [
+        {
+          _id: false,
+          token: { type: String, required: true },
+          platform: { type: String, enum: ['android', 'ios', 'web'], default: 'android' },
+          updatedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+      select: false,
+    },
     isSuspended: { type: Boolean, default: false },
     suspensionReason: { type: String, default: '' },
 

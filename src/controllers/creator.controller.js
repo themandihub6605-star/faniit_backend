@@ -14,7 +14,9 @@ const listCreators = catchAsync(async (req, res) => {
   if (location) filter.location = new RegExp(location, 'i');
   if (minFollowers) filter.followerCount = { $gte: Number(minFollowers) };
   if (search) {
-    filter.$or = [{ bio: new RegExp(search, 'i') }];
+    const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(escaped, 'i');
+    filter.$or = [{ bio: pattern }, { title: pattern }, { skills: pattern }, { location: pattern }];
   }
 
   const creators = await CreatorProfile.find(filter)
@@ -63,7 +65,7 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
     { $inc: { profileViews: 1 } },
     { new: true }
   )
-    .populate('user', 'name avatarUrl email')
+    .populate('user', 'name avatarUrl')
     .populate('category', 'label icon');
 
   if (!creator) throw ApiError.notFound('Creator not found');
@@ -134,6 +136,7 @@ const getMyDashboard = catchAsync(async (req, res) => {
   if (!creator) throw ApiError.notFound('Creator profile not found');
 
   const upcomingSessions = await Session.find({ creator: creator._id, isCompleted: false, isCancelled: false })
+    .select('+zoomStartUrl +zoomJoinUrl')
     .sort({ scheduledAt: 1 })
     .limit(10);
 

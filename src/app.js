@@ -15,6 +15,9 @@ const { handleWebhook } = require('./controllers/payment.controller');
 
 const app = express();
 
+// Behind a proxy (Render, Nginx, Cloudflare) so rate limits see the real client IP.
+app.set('trust proxy', 1);
+
 // --- security & core middleware ---
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 app.use(

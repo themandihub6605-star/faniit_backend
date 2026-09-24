@@ -26,14 +26,40 @@ const updateAvatar = catchAsync(async (req, res) => {
 });
 
 const getUserById = catchAsync(async (req, res) => {
-  const user = await User.findById(req.params.id);
+  // Public endpoint — only return public fields (no email, phone, wallet).
+  const user = await User.findById(req.params.id).select('name avatarUrl role roles createdAt');
   if (!user) throw ApiError.notFound('User not found');
-  return new ApiResponse(200, user.toSafeObject(), 'User fetched').send(res);
+  return new ApiResponse(200, user, 'User fetched').send(res);
 });
 
 const deleteMe = catchAsync(async (req, res) => {
-  await User.findByIdAndUpdate(req.user._id, { isActive: false });
-  return new ApiResponse(200, null, 'Account deactivated').send(res);
+  // Deactivates the account: login, refresh and every protected route
+  // reject it from now on, and the device stops receiving pushes.
+  await User.findByIdAndUpdate(req.user._id, { isActive: false, pushTokens: [] });
+  res.clearCookie('refreshToken');
+  return new ApiResponse(200, null, 'Account deleted').send(res);
+});
+
+/** POST /api/users/me/push-token — { token, platform } registers this device. */
+const registerPushToken = catchAsync(async (req, res) => {
+  const { token, platform = 'android' } = req.body;
+  if (!token || typeof token !== 'string') throw ApiError.badRequest('token is required');
+  if (!['android', 'ios', 'web'].includes(platform)) throw ApiError.badRequest('Invalid platform');
+
+  // A device token belongs to one account at a time.
+  await User.updateMany({ 'pushTokens.token': token }, { $pull: { pushTokens: { token } } });
+  await User.updateOne(
+    { _id: req.user._id },
+    { $push: { pushTokens: { $each: [{ token, platform, updatedAt: new Date() }], $slice: -10 } } }
+  );
+  return new ApiResponse(200, null, 'Device registered').send(res);
+});
+
+/** DELETE /api/users/me/push-token — { token } on logout. */
+const removePushToken = catchAsync(async (req, res) => {
+  const { token } = req.body || {};
+  if (token) await User.updateOne({ _id: req.user._id }, { $pull: { pushTokens: { token } } });
+  return new ApiResponse(200, null, 'Device removed').send(res);
 });
 
 /** PATCH /api/users/me/password — change your own password. Requires the
@@ -111,4 +137,4 @@ const getMyReferrals = catchAsync(async (req, res) => {
   ).send(res);
 });
 
-module.exports = { updateMe, updateAvatar, getUserById, deleteMe, getMyReferrals, changePassword, getMyFollowing };
+module.exports = { updateMe, updateAvatar, getUserById, deleteMe, getMyReferrals, changePassword, getMyFollowing, registerPushToken, removePushToken };

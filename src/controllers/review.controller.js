@@ -17,6 +17,26 @@ async function recalculateRating(userId) {
 const createReview = catchAsync(async (req, res) => {
   const { toUser, relatedModel, relatedId, rating, comment, subRatings } = req.body;
 
+  if (!toUser || !relatedId || !['Campaign', 'Session'].includes(relatedModel)) {
+    throw ApiError.badRequest('toUser, relatedModel and relatedId are required');
+  }
+  if (!Number.isInteger(Number(rating)) || rating < 1 || rating > 5) throw ApiError.badRequest('Rating must be 1 to 5');
+  if (String(toUser) === String(req.user._id)) throw ApiError.badRequest('You cannot review yourself');
+
+  // Only the two sides of a completed campaign can review each other.
+  if (relatedModel === 'Campaign') {
+    const { Campaign } = require('../models');
+    const campaign = await Campaign.findById(relatedId)
+      .populate('brand', 'user')
+      .populate('assignedCreator', 'user');
+    if (!campaign || campaign.status !== 'completed') throw ApiError.badRequest('You can review once the campaign is completed');
+    const brandUser = String(campaign.brand?.user);
+    const creatorUser = String(campaign.assignedCreator?.user);
+    const me = String(req.user._id);
+    const pairOk = (me === brandUser && String(toUser) === creatorUser) || (me === creatorUser && String(toUser) === brandUser);
+    if (!pairOk) throw ApiError.forbidden('Only the brand and creator of this campaign can review each other');
+  }
+
   const existing = await Review.findOne({ fromUser: req.user._id, toUser, relatedModel, relatedId });
   if (existing) throw ApiError.conflict('You have already reviewed this');
 

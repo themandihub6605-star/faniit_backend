@@ -12,6 +12,12 @@ const applicationSchema = new mongoose.Schema(
     deliveryTimeline: { type: String, default: '' }, // e.g. "3 days", "1 week" — creator's estimated turnaround
 
     status: { type: String, enum: Object.values(APPLICATION_STATUS), default: APPLICATION_STATUS.PENDING },
+
+    // Set when the brand decides (were written by the controller but missing
+    // from the schema, so mongoose silently dropped them).
+    feedback: { type: String, default: '' },
+    rejectionReason: { type: String, default: '' },
+    respondedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

@@ -25,10 +25,13 @@ const createDonationOrder = catchAsync(async (req, res) => {
 
 /** POST /api/donations/verify — confirms the donation payment and credits the creator */
 const verifyDonation = catchAsync(async (req, res) => {
-  const { sessionId, amount, message, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  const { sessionId, message, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
 
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
+
+  // Amount comes from Razorpay, never from the client; ids can't be reused.
+  const { amount } = await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
 
   const session = await Session.findById(sessionId).populate('creator');
   if (!session) throw ApiError.notFound('Session not found');

@@ -18,8 +18,10 @@ const sessionSchema = new mongoose.Schema(
     maxParticipants: { type: Number, default: 100 },
 
     zoomMeetingId: { type: String, default: '' },
-    zoomJoinUrl: { type: String, default: '' },
-    zoomStartUrl: { type: String, default: '' },
+    // Hidden from public queries — the join link carries the meeting password
+    // and the start link makes anyone the host. Owners select them explicitly.
+    zoomJoinUrl: { type: String, default: '', select: false },
+    zoomStartUrl: { type: String, default: '', select: false },
     zoomPassword: { type: String, default: '', select: false },
 
     isLive: { type: Boolean, default: false },

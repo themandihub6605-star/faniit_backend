@@ -24,6 +24,9 @@ async function generateUniqueAgencyReferralCode() {
   return attempt;
 }
 
+/** Issues an access + refresh token pair. The refresh token is set as an
+ * httpOnly cookie for the web app AND returned in the response body for
+ * the mobile app, which has no cookie jar and keeps it in secure storage. */
 function issueTokens(res, user) {
   const accessToken = generateAccessToken(user._id, user.role);
   const refreshToken = generateRefreshToken(user._id);
@@ -35,7 +38,7 @@ function issueTokens(res, user) {
     maxAge: 30 * 24 * 60 * 60 * 1000,
   });
 
-  return accessToken;
+  return { accessToken, refreshToken };
 }
 
 /** Creator/Brand/Agency need admin approval before they get full dashboard
@@ -75,9 +78,9 @@ const register = catchAsync(async (req, res) => {
     await AgencyProfile.create({ user: user._id, agencyName: name, referralCode: await generateUniqueAgencyReferralCode() });
   }
 
-  const accessToken = issueTokens(res, user);
+  const { accessToken, refreshToken } = issueTokens(res, user);
   const profileStatus = await getProfileStatus(user);
-  return new ApiResponse(201, { user: { ...user.toSafeObject(), profileStatus }, accessToken, profileStatus }, 'Account created successfully').send(res);
+  return new ApiResponse(201, { user: { ...user.toSafeObject(), profileStatus }, accessToken, refreshToken, profileStatus }, 'Account created successfully').send(res);
 });
 
 const login = catchAsync(async (req, res) => {
@@ -88,17 +91,21 @@ const login = catchAsync(async (req, res) => {
     throw ApiError.unauthorized('Invalid email or password');
   }
   if (user.isSuspended) throw ApiError.forbidden('Your account has been suspended. Contact support.');
+  if (user.isActive === false) throw ApiError.unauthorized('This account has been deleted');
 
   user.lastLoginAt = new Date();
   await user.save();
 
-  const accessToken = issueTokens(res, user);
+  const { accessToken, refreshToken } = issueTokens(res, user);
   const profileStatus = await getProfileStatus(user);
-  return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, profileStatus }, 'Logged in successfully').send(res);
+  return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, refreshToken, profileStatus }, 'Logged in successfully').send(res);
 });
 
+/** POST /api/auth/refresh — web sends the refresh token as a cookie, the
+ * mobile app sends it in the body as { refreshToken }. Rotates the pair on
+ * every refresh so an active session never hits the 30-day expiry. */
 const refresh = catchAsync(async (req, res) => {
-  const token = req.cookies?.refreshToken;
+  const token = req.cookies?.refreshToken || req.body?.refreshToken;
   if (!token) throw ApiError.unauthorized('No refresh token provided');
 
   let decoded;
@@ -109,10 +116,11 @@ const refresh = catchAsync(async (req, res) => {
   }
 
   const user = await User.findById(decoded.id);
-  if (!user) throw ApiError.unauthorized('User no longer exists');
+  if (!user || user.isActive === false) throw ApiError.unauthorized('User no longer exists');
+  if (user.isSuspended) throw ApiError.unauthorized('Your account has been suspended');
 
-  const accessToken = generateAccessToken(user._id, user.role);
-  return new ApiResponse(200, { accessToken }, 'Token refreshed').send(res);
+  const { accessToken, refreshToken } = issueTokens(res, user);
+  return new ApiResponse(200, { accessToken, refreshToken }, 'Token refreshed').send(res);
 });
 
 const logout = catchAsync(async (req, res) => {
@@ -259,10 +267,10 @@ const googleAuth = catchAsync(async (req, res) => {
     }
   }
 
-  const accessToken = issueTokens(res, user);
+  const { accessToken, refreshToken } = issueTokens(res, user);
   const profileStatus = await getProfileStatus(user);
   console.log('[google-auth backend] SUCCESS — issuing tokens for user:', user.email, ', role:', user.role);
-  return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, isNewUser, profileStatus }, 'Signed in with Google').send(res);
+  return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, refreshToken, isNewUser, profileStatus }, 'Signed in with Google').send(res);
 });
 
 module.exports = { register, login, refresh, logout, getMe, forgotPassword, resetPassword, googleAuth, upgradeRole, completeOnboarding };

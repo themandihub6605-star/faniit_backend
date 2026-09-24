@@ -7,6 +7,8 @@ const registerSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
   phone: z.string().optional(),
   role: z.enum([ROLES.FAN, ROLES.CREATOR, ROLES.BRAND, ROLES.AGENCY]).default(ROLES.FAN),
+  // Was missing, so zod stripped it and email signups never recorded a referrer.
+  referralCode: z.string().trim().max(32).optional(),
 });
 
 const loginSchema = z.object({

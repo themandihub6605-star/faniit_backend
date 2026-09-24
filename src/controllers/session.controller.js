@@ -134,6 +134,17 @@ const getJoinToken = catchAsync(async (req, res) => {
   if (!session.zoomMeetingId) throw ApiError.badRequest('This session has no live meeting provisioned yet');
 
   const isHost = session.creator.user.equals(req.user._id);
+
+  // Only the host and people with a confirmed booking may join.
+  if (!isHost) {
+    const { Booking } = require('../models');
+    const booked = await Booking.exists({
+      session: session._id,
+      user: req.user._id,
+      status: { $in: ['confirmed', 'completed'] },
+    });
+    if (!booked) throw ApiError.forbidden('Book this session to join it');
+  }
   const signature = zoomService.generateSdkSignature(session.zoomMeetingId, isHost ? 1 : 0);
 
   return new ApiResponse(200, {
