@@ -1,6 +1,9 @@
 const express = require('express');
 const router = express.Router();
 
+// Public webhook routes (no auth) — keep at top
+router.use('/whatsapp', require('./whatsapp.routes'));
+
 router.use('/auth', require('./auth.routes'));
 router.use('/users', require('./user.routes'));
 router.use('/creators', require('./creator.routes'));
