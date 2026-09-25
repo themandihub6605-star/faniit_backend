@@ -2,7 +2,6 @@ const crypto = require('crypto');
 const { User, CreatorProfile, BrandProfile, AgencyProfile } = require('../models');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/generateToken');
 const generateSlug = require('../utils/slugify');
-const generateReferralCode = require('../utils/generateReferralCode');
 const catchAsync = require('../utils/catchAsync');
 const ApiError = require('../utils/apiError');
 const ApiResponse = require('../utils/apiResponse');
@@ -10,19 +9,8 @@ const { ROLES } = require('../constants/enums');
 const { resolveReferrer } = require('../services/referral.service');
 const { sendPasswordResetEmail } = require('../services/email.service');
 
-// Agencies used to get a name-derived referral code (e.g. "PRABHANSH4342")
-// via generateSlug(name).toUpperCase() — inconsistent with every other
-// referral code in the app, which is a clean random 6-character code
-// (see utils/generateReferralCode.js, already used by User.model.js's
-// own pre-save hook). This mirrors that same collision-check pattern for
-// AgencyProfile's separately-indexed referralCode field.
-async function generateUniqueAgencyReferralCode() {
-  let attempt = generateReferralCode();
-  while (await AgencyProfile.exists({ referralCode: attempt })) {
-    attempt = generateReferralCode();
-  }
-  return attempt;
-}
+// Agency profiles reuse their owner's 8-character user referral code
+// (AGxxxxxx) — one code per agency, see utils/generateReferralCode.js.
 
 /** Issues an access + refresh token pair. The refresh token is set as an
  * httpOnly cookie for the web app AND returned in the response body for
@@ -75,7 +63,7 @@ const register = catchAsync(async (req, res) => {
   } else if (role === ROLES.BRAND) {
     await BrandProfile.create({ user: user._id, companyName: name, slug: generateSlug(name) });
   } else if (role === ROLES.AGENCY) {
-    await AgencyProfile.create({ user: user._id, agencyName: name, referralCode: await generateUniqueAgencyReferralCode() });
+    await AgencyProfile.create({ user: user._id, agencyName: name, referralCode: user.referralCode });
   }
 
   const { accessToken, refreshToken } = issueTokens(res, user);
@@ -193,7 +181,7 @@ const upgradeRole = catchAsync(async (req, res) => {
   } else if (role === ROLES.BRAND && !(await BrandProfile.findOne({ user: user._id }))) {
     await BrandProfile.create({ user: user._id, companyName: name || user.name, slug: generateSlug(name || user.name) });
   } else if (role === ROLES.AGENCY && !(await AgencyProfile.findOne({ user: user._id }))) {
-    await AgencyProfile.create({ user: user._id, agencyName: name || user.name, referralCode: await generateUniqueAgencyReferralCode() });
+    await AgencyProfile.create({ user: user._id, agencyName: name || user.name, referralCode: user.referralCode });
   }
 
   const profileStatus = await getProfileStatus(user);
@@ -263,7 +251,7 @@ const googleAuth = catchAsync(async (req, res) => {
     } else if (role === ROLES.BRAND) {
       await BrandProfile.create({ user: user._id, companyName: finalName, slug: generateSlug(finalName) });
     } else if (role === ROLES.AGENCY) {
-      await AgencyProfile.create({ user: user._id, agencyName: finalName, referralCode: await generateUniqueAgencyReferralCode() });
+      await AgencyProfile.create({ user: user._id, agencyName: finalName, referralCode: user.referralCode });
     }
   }
 

@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { ROLES } = require('../constants/enums');
+const {
+  generateReferralCode,
+  referralPrefixFor,
+  isValidReferralCode,
+} = require('../utils/generateReferralCode');
 
 const userSchema = new mongoose.Schema(
   {
@@ -75,18 +80,31 @@ userSchema.pre('save', async function hashPassword(next) {
   next();
 });
 
+// Every user gets one 8-character referral code whose prefix matches their
+// current role (see utils/generateReferralCode.js). A new code is issued when
+// the account has none, has an old-format code, or switches role.
 userSchema.pre('save', async function assignReferralCode(next) {
-  if (this.referralCode) return next();
-  const base = (this.name || 'user')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 8) || 'user';
-  let attempt = `${base}${Math.floor(1000 + Math.random() * 9000)}`;
-  while (await this.constructor.exists({ referralCode: attempt })) {
-    attempt = `${base}${Math.floor(1000 + Math.random() * 9000)}`;
+  const prefix = referralPrefixFor(this.role);
+  const current = this.referralCode || '';
+  const needsNewCode =
+    !current || !isValidReferralCode(current) || (this.isModified('role') && !current.startsWith(prefix));
+  if (!needsNewCode) return next();
+
+  let attempt = generateReferralCode(this.role);
+  // eslint-disable-next-line no-await-in-loop
+  while (await this.constructor.exists({ referralCode: attempt, _id: { $ne: this._id } })) {
+    attempt = generateReferralCode(this.role);
   }
-  this.referralCode = attempt.toUpperCase();
+  this.referralCode = attempt;
+  this.$locals.referralCodeChanged = true;
   next();
+});
+
+// Agencies share the same code for signups and for creators/brands joining
+// their network — keep the AgencyProfile copy in sync.
+userSchema.post('save', async function syncAgencyReferralCode(doc) {
+  if (!doc.$locals.referralCodeChanged || doc.role !== ROLES.AGENCY) return;
+  await mongoose.model('AgencyProfile').updateOne({ user: doc._id }, { referralCode: doc.referralCode });
 });
 
 userSchema.methods.comparePassword = function comparePassword(candidate) {

@@ -79,6 +79,18 @@ const createDraftCampaign = catchAsync(async (req, res) => {
   return new ApiResponse(201, campaign, 'Draft created').send(res);
 });
 
+// Loose http(s) URL check — used to sanity-check sample media links
+// before they're stored, same idea as the frontend's isValidUrl.
+function isValidHttpUrl(value) {
+  if (typeof value !== 'string') return false;
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 const updateDraftCampaign = catchAsync(async (req, res) => {
   const campaign = await Campaign.findById(req.params.id).populate('brand');
   if (!campaign) throw ApiError.notFound('Campaign not found');
@@ -109,6 +121,17 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   }
   if (req.body.milestoneTitles !== undefined) {
     campaign.milestoneTitles = Array.isArray(req.body.milestoneTitles) ? req.body.milestoneTitles.slice(0, 4) : [];
+  }
+
+  // Sample media is now a set of reference links (e.g. Instagram/YouTube
+  // post URLs) pasted in by the brand, rather than uploaded files.
+  // Invalid entries are silently dropped rather than failing the whole
+  // draft update — the frontend already validates before sending, this
+  // is just a server-side safety net.
+  if (req.body.sampleMedia !== undefined) {
+    campaign.sampleMedia = Array.isArray(req.body.sampleMedia)
+      ? req.body.sampleMedia.filter(isValidHttpUrl).slice(0, 10)
+      : [];
   }
 
   const editableFields = [
@@ -190,6 +213,9 @@ const uploadCampaignMedia = catchAsync(async (req, res) => {
   if (req.files?.campaignImage?.[0]) {
     campaign.campaignImageUrl = req.files.campaignImage[0].path;
   }
+  // `media` (file uploads) kept for backward compatibility — the current
+  // frontend flow no longer sends these, sample media links go through
+  // updateDraftCampaign's `sampleMedia` field instead.
   if (req.files?.media?.length) {
     campaign.sampleMedia.push(...req.files.media.map((f) => f.path));
   }
@@ -206,6 +232,10 @@ function assertPublishable(campaign) {
   const missing = [];
   if (!campaign.title || campaign.title.trim().length < 3) missing.push('Campaign name');
   if (!campaign.description || campaign.description.trim().length < 10) missing.push('Description');
+  // A campaign image is mandatory before going live — it's the first
+  // thing creators see, so publishing without one is blocked here too,
+  // not just on the frontend form.
+  if (!campaign.campaignImageUrl) missing.push('Campaign image');
   if (campaign.campaignType === CAMPAIGN_TYPE.PAID && (!campaign.costPerInfluencer || campaign.costPerInfluencer < 100)) {
     missing.push('Cost per influencer');
   }

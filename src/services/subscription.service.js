@@ -67,6 +67,34 @@ async function getOrCreateActiveSubscription(userId, appliesTo) {
     return sub;
   }
 
+  // The subscription must belong to the role being checked. A user who
+  // started as a fan/creator and later became a brand (or vice versa)
+  // still had their old role's plan attached — e.g. Creator Lite, which
+  // has no campaign limit — so brand quotas were never enforced and the
+  // pricing page showed "Unlimited campaigns". Move a free plan (or a
+  // lapsed paid one) onto the current role's default plan.
+  const planMissing = !sub.plan;
+  const wrongRole = sub.plan && sub.plan.appliesTo !== appliesTo;
+  if (planMissing || wrongRole) {
+    const isPaidPlanStillActive =
+      !planMissing && sub.plan.price > 0 && sub.status === SUBSCRIPTION_STATUS.ACTIVE && sub.razorpaySubscriptionId && !sub.cancelAtPeriodEnd;
+
+    if (!isPaidPlanStillActive) {
+      const defaultPlan = await getDefaultPlan(appliesTo);
+      sub.plan = defaultPlan._id;
+      sub.status = SUBSCRIPTION_STATUS.ACTIVE;
+      sub.razorpaySubscriptionId = '';
+      sub.cancelAtPeriodEnd = false;
+      sub.currentPeriodStart = new Date();
+      sub.currentPeriodEnd = addCycle(new Date(), defaultPlan.billingCycle);
+      sub.proposalsUsedThisCycle = 0;
+      sub.campaignsPostedThisCycle = 0;
+      await sub.save();
+      sub = await sub.populate('plan');
+      return sub;
+    }
+  }
+
   if (sub.currentPeriodEnd && new Date() > sub.currentPeriodEnd) {
     const isPaidPlanStillActive = sub.plan.price > 0 && sub.status === SUBSCRIPTION_STATUS.ACTIVE && sub.razorpaySubscriptionId && !sub.cancelAtPeriodEnd;
 

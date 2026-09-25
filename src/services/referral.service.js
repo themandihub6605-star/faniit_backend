@@ -1,14 +1,14 @@
 const { User, ReferralConfig, Transaction } = require('../models');
 const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/enums');
+const { normalizeReferralCode, isValidReferralCode } = require('../utils/generateReferralCode');
 
 /** Look up a user by their referral code. Returns null if the code doesn't
  * exist — callers should treat an invalid code as "no referrer", not an error,
  * since it's an optional field the person may have mistyped. */
 async function resolveReferrer(code) {
-  if (!code) return null;
-  const trimmed = String(code).trim().toUpperCase();
-  if (!trimmed) return null;
-  return User.findOne({ referralCode: trimmed });
+  const normalized = normalizeReferralCode(code);
+  if (!isValidReferralCode(normalized)) return null;
+  return User.findOne({ referralCode: normalized });
 }
 
 /** Which config field applies for a given (referrer role -> earner role) pair.

@@ -1,5 +1,6 @@
 const { AgencyProfile, CreatorProfile, BrandProfile, User, Transaction } = require('../models');
 const catchAsync = require('../utils/catchAsync');
+const { normalizeReferralCode, isValidReferralCode } = require('../utils/generateReferralCode');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { ROLES, VERIFICATION_STATUS, TRANSACTION_TYPE } = require('../constants/enums');
@@ -64,7 +65,8 @@ const uploadDocument = catchAsync(async (req, res) => {
 const linkCreatorToAgency = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can link to an agency');
 
-  const { referralCode } = req.body;
+  const referralCode = normalizeReferralCode(req.body.referralCode);
+  if (!isValidReferralCode(referralCode)) throw ApiError.badRequest('Referral code must be exactly 8 characters');
   const agency = await AgencyProfile.findOne({ referralCode });
   if (!agency) throw ApiError.notFound('Invalid referral code');
   if (agency.verificationStatus !== VERIFICATION_STATUS.VERIFIED) {
@@ -88,7 +90,8 @@ const linkCreatorToAgency = catchAsync(async (req, res) => {
 const linkBrandToAgency = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.BRAND) throw ApiError.forbidden('Only brands can link to an agency');
 
-  const { referralCode } = req.body;
+  const referralCode = normalizeReferralCode(req.body.referralCode);
+  if (!isValidReferralCode(referralCode)) throw ApiError.badRequest('Referral code must be exactly 8 characters');
   const agency = await AgencyProfile.findOne({ referralCode });
   if (!agency) throw ApiError.notFound('Invalid referral code');
   if (agency.verificationStatus !== VERIFICATION_STATUS.VERIFIED) {
