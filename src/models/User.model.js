@@ -61,6 +61,9 @@ const userSchema = new mongoose.Schema(
     suspensionReason: { type: String, default: '' },
 
     walletBalance: { type: Number, default: 0 },
+    // Part of walletBalance that already had a fee taken at sale time
+    // (Fanitt Store). Withdrawals don't charge the platform fee on it again.
+    walletFeeExempt: { type: Number, default: 0, min: 0 },
 
     passwordResetToken: { type: String, select: false },
     passwordResetExpires: { type: Date, select: false },

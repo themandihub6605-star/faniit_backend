@@ -49,6 +49,7 @@ const TRANSACTION_TYPE = Object.freeze({
   SUBSCRIPTION_PAYMENT: 'subscription_payment',
   EXTRA_PROPOSAL_FEE: 'extra_proposal_fee',
   REFUND: 'refund',
+  STORE_SALE: 'store_sale',
 });
 
 const TRANSACTION_STATUS = Object.freeze({

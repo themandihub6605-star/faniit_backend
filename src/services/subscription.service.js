@@ -255,7 +255,17 @@ async function getBrandPlanFields(userId) {
   return sub.plan;
 }
 
+/** Gives back a brand's campaign slot (e.g. an admin rejected the campaign). */
+async function releaseBrandCampaignSlot(userId) {
+  const { UserSubscription } = require('../models');
+  await UserSubscription.updateOne(
+    { user: userId, campaignsPostedThisCycle: { $gt: 0 } },
+    { $inc: { campaignsPostedThisCycle: -1 } }
+  );
+}
+
 module.exports = {
+  releaseBrandCampaignSlot,
   ensureRazorpayPlan,
   getProTierUserIds,
   isViewerOnLiteTier,

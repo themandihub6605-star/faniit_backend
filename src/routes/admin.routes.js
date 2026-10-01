@@ -2,6 +2,10 @@ const express = require('express');
 const router = express.Router();
 
 const admin = require('../controllers/admin.controller');
+const adminPosts = require('../controllers/adminPost.controller');
+const broadcasts = require('../controllers/broadcast.controller');
+const adminCampaigns = require('../controllers/adminCampaign.controller');
+const { uploadImage } = require('../middlewares/upload.middleware');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
 const { ROLES } = require('../constants/enums');
@@ -44,7 +48,12 @@ router.get('/settings', admin.getSiteSettings);
 router.patch('/settings', admin.updateSiteSettings);
 
 // Broadcast notifications
-router.post('/notifications/broadcast', admin.broadcastNotification);
+router.post('/notifications/broadcast', uploadImage('fanitt/notifications').single('image'), broadcasts.createBroadcast);
+router.get('/notifications/audience', broadcasts.audienceCount);
+router.get('/notifications/broadcasts', broadcasts.listBroadcasts);
+router.patch('/notifications/broadcasts/:id/cancel', broadcasts.cancelBroadcast);
+router.patch('/notifications/broadcasts/:id/reschedule', broadcasts.reschedule);
+router.post('/notifications/broadcasts/:id/send-now', broadcasts.sendNow);
 
 // Admin accounts
 router.get('/admins', admin.listAdmins);
@@ -54,8 +63,22 @@ router.post('/admins', admin.createAdmin);
 router.get('/sessions', admin.listAllSessions);
 router.patch('/sessions/:id/remove', admin.removeSession);
 router.get('/campaigns', admin.listAllCampaigns);
+
+// Campaign review & management
+router.get('/campaigns/rules', adminCampaigns.getRules);
+router.patch('/campaigns/rules', adminCampaigns.updateRules);
+router.get('/campaigns/all', adminCampaigns.listCampaigns);
+router.get('/campaigns/:id/details', adminCampaigns.getCampaignDetails);
+router.patch('/campaigns/:id/approve', adminCampaigns.approveCampaign);
+router.patch('/campaigns/:id/reject', adminCampaigns.rejectCampaign);
+router.patch('/campaigns/:id/unpublish', adminCampaigns.unpublishCampaign);
 router.get('/reviews', admin.listAllReviews);
 router.patch('/reviews/:id/hide', admin.hideReview);
+
+// Posts (creator feed + community) — search, edit, delete
+router.get('/posts', adminPosts.listPosts);
+router.patch('/posts/:type/:id', adminPosts.updatePost);
+router.delete('/posts/:type/:id', adminPosts.deletePost);
 
 // Payments / Escrow / Disputes
 router.get('/transactions', admin.listAllTransactions);

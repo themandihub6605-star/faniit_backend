@@ -28,6 +28,9 @@ router.use('/wallet', require('./wallet.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/subscriptions', require('./subscription.routes'));
 
+// Fanitt Store — all store code lives in src/FanittStore
+router.use('/store', require('../FanittStore'));
+
 router.get('/health', (req, res) => res.json({ success: true, message: 'Fanitt API is running' }));
 
 module.exports = router;

@@ -24,6 +24,11 @@ const siteSettingsSchema = new mongoose.Schema(
     // Pro creators (plan.hasEarlyAccess) skip this wait entirely.
     creatorEarlyAccessHours: { type: Number, default: 6, min: 0 },
 
+    // Paid campaigns can't be published below this total budget (paise).
+    minCampaignBudget: { type: Number, default: 20000, min: 0 },
+    // New campaigns wait for admin approval before going public.
+    requireCampaignApproval: { type: Boolean, default: true },
+
     // --- Milestone-based campaign escrow (Point 12) ---
     // What percentage of a campaign's budget becomes the advance milestone
     // the moment a brand accepts a creator (milestone.service.js

@@ -62,10 +62,14 @@ const requestWithdrawal = catchAsync(async (req, res) => {
   if (user.walletBalance < amount) throw ApiError.badRequest('Insufficient wallet balance');
 
   const platformFeePercent = await walletService.getPlatformFeePercentFor(user);
-  const platformFee = Math.round((amount * platformFeePercent) / 100);
+  // Fanitt Store earnings already paid the store fee when the sale happened,
+  // so that part of the balance is withdrawn without a second fee.
+  const feeExemptUsed = Math.min(amount, Math.max(0, user.walletFeeExempt || 0));
+  const platformFee = Math.round(((amount - feeExemptUsed) * platformFeePercent) / 100);
   const netPayoutAmount = amount - platformFee;
 
   user.walletBalance -= amount;
+  user.walletFeeExempt = Math.max(0, (user.walletFeeExempt || 0) - feeExemptUsed);
   await user.save();
 
   const withdrawal = await Withdrawal.create({

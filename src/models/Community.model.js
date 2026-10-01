@@ -1,13 +1,30 @@
 const mongoose = require('mongoose');
 
+const VISIBILITY = ['public', 'private'];
+// Who may create posts: every member, or only the owner + moderators.
+const POST_PERMISSION = ['all', 'moderators'];
+
 const communitySchema = new mongoose.Schema(
   {
-    name: { type: String, required: true, trim: true },
+    name: { type: String, required: true, trim: true, maxlength: 60 },
     slug: { type: String, required: true, unique: true, index: true },
-    description: { type: String, maxlength: 500, default: '' },
+    description: { type: String, maxlength: 1000, default: '' },
     category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category' },
     coverImageUrl: { type: String, default: '' },
     iconUrl: { type: String, default: '' },
+
+    // Community guidelines shown on the About tab (max 10).
+    rules: {
+      type: [{ type: String, trim: true, maxlength: 300 }],
+      default: [],
+      validate: { validator: (arr) => arr.length <= 10, message: 'A community can have up to 10 rules' },
+    },
+
+    // Private: anyone can find it, but only approved members see posts,
+    // members and chat. Joining creates a request moderators approve.
+    visibility: { type: String, enum: VISIBILITY, default: 'public' },
+    postPermission: { type: String, enum: POST_PERMISSION, default: 'all' },
+    chatEnabled: { type: Boolean, default: true },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     isVerified: { type: Boolean, default: false },
@@ -15,11 +32,20 @@ const communitySchema = new mongoose.Schema(
 
     memberCount: { type: Number, default: 0 },
     discussionCount: { type: Number, default: 0 },
+    pendingRequestCount: { type: Number, default: 0 },
+
+    // Bumped by posts, comments and chat — drives "Trending".
+    lastActivityAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
 );
 
 communitySchema.index({ category: 1 });
 communitySchema.index({ isFeatured: -1, memberCount: -1 });
+communitySchema.index({ lastActivityAt: -1 });
+communitySchema.index({ name: 'text', description: 'text' });
+
+communitySchema.statics.VISIBILITY = VISIBILITY;
+communitySchema.statics.POST_PERMISSION = POST_PERMISSION;
 
 module.exports = mongoose.model('Community', communitySchema);

@@ -59,6 +59,14 @@ const campaignSchema = new mongoose.Schema(
 
     publishedAt: { type: Date, default: null },
 
+    // --- Admin review: a published campaign is only public once approved.
+    // Campaigns published before this existed have no value and stay visible.
+    approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: undefined, index: true },
+    rejectionReason: { type: String, default: '' },
+    submittedForReviewAt: { type: Date, default: null },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+
     // --- Subscription-driven fields, set automatically at publish time
     // from the posting brand's active plan (see publishCampaign) ---
     visibilityTier: { type: String, enum: Object.values(CAMPAIGN_VISIBILITY_TIER), default: CAMPAIGN_VISIBILITY_TIER.LITE },

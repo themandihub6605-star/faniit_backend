@@ -3,6 +3,7 @@ const { verifyAccessToken } = require('../utils/generateToken');
 const env = require('./env');
 const { User, Conversation, Message } = require('../models');
 const notificationService = require('../services/notification.service');
+const communityService = require('../services/community.service');
 
 let io = null;
 
@@ -102,6 +103,39 @@ function initSocket(httpServer) {
       conversation.participants
         .filter((p) => String(p) !== socket.userId)
         .forEach((p) => io.to(userRoom(String(p))).emit('typing', { conversationId, userId: socket.userId }));
+    });
+
+    // --- Community group chat -------------------------------------------
+    // Clients join a community room while its chat is open.
+    socket.on('community_join', async ({ communityId } = {}, ack) => {
+      try {
+        const community = await communityService.findCommunity(communityId);
+        const membership = await communityService.getMembership(community._id, socket.userId);
+        communityService.assertMember(membership);
+        if (!community.chatEnabled) throw new Error('Chat is turned off in this community');
+        socket.join(communityService.communityRoom(community._id));
+        if (typeof ack === 'function') ack({ success: true });
+      } catch (err) {
+        if (typeof ack === 'function') ack({ success: false, message: err.message });
+      }
+    });
+
+    socket.on('community_leave', ({ communityId } = {}) => {
+      if (communityId) socket.leave(communityService.communityRoom(communityId));
+    });
+
+    socket.on('community_send', async ({ communityId, text } = {}, ack) => {
+      try {
+        const message = await communityService.createChatMessage(communityId, socket.userId, text);
+        if (typeof ack === 'function') ack({ success: true, message });
+      } catch (err) {
+        if (typeof ack === 'function') ack({ success: false, message: err.message });
+      }
+    });
+
+    socket.on('community_typing', ({ communityId } = {}) => {
+      if (!communityId) return;
+      socket.to(communityService.communityRoom(communityId)).emit('community_typing', { communityId, userId: socket.userId });
     });
 
     socket.on('typing_stop', async ({ conversationId }) => {

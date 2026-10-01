@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 const {
+  getCampaignRules,
   listCampaigns,
   getCampaignById,
   getMyDraftCampaign,
@@ -23,7 +24,7 @@ const {
   submitWork,
   approveWork,
 } = require('../controllers/campaign.controller');
-const { protect } = require('../middlewares/auth.middleware');
+const { protect, optionalAuth } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
 const validate = require('../middlewares/validate.middleware');
 const { uploadImage, uploadMedia } = require('../middlewares/upload.middleware');
@@ -41,6 +42,7 @@ router.get('/proposals/me', protect, authorize(ROLES.CREATOR), getMyProposals);
 router.get('/suggested/me', protect, authorize(ROLES.CREATOR), getSuggestedCampaigns);
 router.get('/saved/me', protect, getSavedCampaigns);
 
+router.get('/rules', getCampaignRules);
 router.get('/', listCampaigns);
 router.post('/draft', protect, authorize(ROLES.BRAND), validate(createDraftCampaignSchema), createDraftCampaign);
 
@@ -86,6 +88,6 @@ router.patch('/:id/approve', protect, authorize(ROLES.BRAND), approveWork);
 router.get('/:id/milestones', protect, getMilestonesForCampaign);
 
 // generic :id GET must come after the specific static GET routes above
-router.get('/:id', getCampaignById);
+router.get('/:id', optionalAuth, getCampaignById);
 
 module.exports = router;

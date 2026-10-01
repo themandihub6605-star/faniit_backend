@@ -17,10 +17,36 @@ const {
   CREATOR_CAMPAIGN_ACCESS,
 } = require('../constants/enums');
 
+// Campaigns waiting for admin review, or rejected, never show publicly.
+// Campaigns published before approval existed have no approvalStatus and
+// stay visible.
+const PUBLICLY_APPROVED = { approvalStatus: { $nin: ['pending', 'rejected'] } };
+
+function isApproved(campaign) {
+  return campaign.approvalStatus !== 'pending' && campaign.approvalStatus !== 'rejected';
+}
+
+function formatRupees(paise) {
+  return `₹${Math.round(paise / 100).toLocaleString('en-IN')}`;
+}
+
+/** GET /api/campaigns/rules — public posting rules for the web/app forms. */
+const getCampaignRules = catchAsync(async (req, res) => {
+  const settings = await SiteSettings.getSingleton();
+  return new ApiResponse(
+    200,
+    {
+      minCampaignBudget: settings.minCampaignBudget,
+      requireCampaignApproval: settings.requireCampaignApproval,
+    },
+    'Campaign rules'
+  ).send(res);
+});
+
 const listCampaigns = catchAsync(async (req, res) => {
   const { category, status = CAMPAIGN_STATUS.OPEN, page = 1, limit = 20 } = req.query;
 
-  const filter = {};
+  const filter = { ...PUBLICLY_APPROVED };
   if (category) filter.category = category;
   // Drafts are private to their brand — never list them publicly.
   filter.status = status && status !== CAMPAIGN_STATUS.DRAFT ? status : CAMPAIGN_STATUS.OPEN;
@@ -44,7 +70,14 @@ const getCampaignById = catchAsync(async (req, res) => {
     .populate({ path: 'assignedCreator', populate: { path: 'user', select: 'name avatarUrl' } });
 
   if (!campaign) throw ApiError.notFound('Campaign not found');
-  if (campaign.status === CAMPAIGN_STATUS.DRAFT) throw ApiError.notFound('Campaign not found');
+
+  // Drafts, and campaigns waiting for review or rejected, are only visible
+  // to the owning brand (so they can see the review status) and admins.
+  if (campaign.status === CAMPAIGN_STATUS.DRAFT || !isApproved(campaign)) {
+    const isOwner = req.user && campaign.brand?.user && String(campaign.brand.user._id || campaign.brand.user) === String(req.user._id);
+    const isAdmin = req.user?.role === ROLES.ADMIN;
+    if (!isOwner && !isAdmin) throw ApiError.notFound('Campaign not found');
+  }
 
   return new ApiResponse(200, campaign, 'Campaign fetched').send(res);
 });
@@ -53,9 +86,6 @@ const getMyDraftCampaign = catchAsync(async (req, res) => {
   const campaign = await Campaign.findById(req.params.id).populate('brand').populate('category', 'label icon');
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
-
-  // TEMPORARY-DEBUG — remove once milestone data is confirmed flowing correctly
-  console.log('[DEBUG getMyDraftCampaign] milestoneCount:', campaign.milestoneCount, '| milestoneTitles:', campaign.milestoneTitles);
 
   return new ApiResponse(200, campaign, 'Draft fetched').send(res);
 });
@@ -97,13 +127,9 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
   if (campaign.status !== CAMPAIGN_STATUS.DRAFT) throw ApiError.conflict('Only draft campaigns can be edited this way');
 
-  // TEMPORARY-DEBUG — remove once milestone data is confirmed flowing correctly
-  console.log('[DEBUG updateDraftCampaign] req.body.milestoneCount:', req.body.milestoneCount, '| req.body.milestoneTitles:', req.body.milestoneTitles);
-
   // applicantLimit / dailyApplicantLimit are only settable if the brand's
   // active plan allows it — silently dropped (not an error) if they're
   // not entitled to it, so the rest of the draft update still succeeds.
-  // One plan lookup covers both fields.
   if (req.body.applicantLimit !== undefined || req.body.dailyApplicantLimit !== undefined) {
     const brandPlan = await subscriptionService.getBrandPlanFields(req.user._id);
     if (brandPlan.canSetApplicantLimit) {
@@ -112,10 +138,7 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
     }
   }
 
-  // Upwork-style flow: how many equal milestones the budget splits into
-  // (1-4). Clamped rather than rejected outright — a stray value like 0
-  // or 7 just gets pulled back into range instead of failing the whole
-  // draft update.
+  // Upwork-style flow: how many equal milestones the budget splits into (1-4).
   if (req.body.milestoneCount !== undefined) {
     campaign.milestoneCount = Math.min(4, Math.max(1, Number(req.body.milestoneCount) || 2));
   }
@@ -123,15 +146,10 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
     campaign.milestoneTitles = Array.isArray(req.body.milestoneTitles) ? req.body.milestoneTitles.slice(0, 4) : [];
   }
 
-  // Sample media is now a set of reference links (e.g. Instagram/YouTube
-  // post URLs) pasted in by the brand, rather than uploaded files.
-  // Invalid entries are silently dropped rather than failing the whole
-  // draft update — the frontend already validates before sending, this
-  // is just a server-side safety net.
+  // Sample media is a set of reference links (Instagram/YouTube post URLs)
+  // pasted in by the brand. Invalid entries are silently dropped.
   if (req.body.sampleMedia !== undefined) {
-    campaign.sampleMedia = Array.isArray(req.body.sampleMedia)
-      ? req.body.sampleMedia.filter(isValidHttpUrl).slice(0, 10)
-      : [];
+    campaign.sampleMedia = Array.isArray(req.body.sampleMedia) ? req.body.sampleMedia.filter(isValidHttpUrl).slice(0, 10) : [];
   }
 
   const editableFields = [
@@ -168,9 +186,6 @@ const updateDraftCampaign = catchAsync(async (req, res) => {
   }
 
   await campaign.save();
-
-  // TEMPORARY-DEBUG — remove once milestone data is confirmed flowing correctly
-  console.log('[DEBUG updateDraftCampaign] SAVED campaign.milestoneCount:', campaign.milestoneCount, '| campaign.milestoneTitles:', campaign.milestoneTitles);
 
   return new ApiResponse(200, campaign, 'Draft updated').send(res);
 });
@@ -213,9 +228,8 @@ const uploadCampaignMedia = catchAsync(async (req, res) => {
   if (req.files?.campaignImage?.[0]) {
     campaign.campaignImageUrl = req.files.campaignImage[0].path;
   }
-  // `media` (file uploads) kept for backward compatibility — the current
-  // frontend flow no longer sends these, sample media links go through
-  // updateDraftCampaign's `sampleMedia` field instead.
+  // `media` (file uploads) kept for backward compatibility — sample media
+  // links go through updateDraftCampaign's `sampleMedia` field instead.
   if (req.files?.media?.length) {
     campaign.sampleMedia.push(...req.files.media.map((f) => f.path));
   }
@@ -228,13 +242,11 @@ const uploadCampaignMedia = catchAsync(async (req, res) => {
   ).send(res);
 });
 
-function assertPublishable(campaign) {
+function assertPublishable(campaign, settings) {
   const missing = [];
   if (!campaign.title || campaign.title.trim().length < 3) missing.push('Campaign name');
   if (!campaign.description || campaign.description.trim().length < 10) missing.push('Description');
-  // A campaign image is mandatory before going live — it's the first
-  // thing creators see, so publishing without one is blocked here too,
-  // not just on the frontend form.
+  // A campaign image is mandatory — it's the first thing creators see.
   if (!campaign.campaignImageUrl) missing.push('Campaign image');
   if (campaign.campaignType === CAMPAIGN_TYPE.PAID && (!campaign.costPerInfluencer || campaign.costPerInfluencer < 100)) {
     missing.push('Cost per influencer');
@@ -243,34 +255,58 @@ function assertPublishable(campaign) {
     missing.push('At least one barter product');
   }
   if (missing.length) throw ApiError.badRequest(`Please complete before publishing: ${missing.join(', ')}`);
+
+  // Admin-set minimum budget for paid campaigns.
+  const minBudget = settings.minCampaignBudget || 0;
+  if (campaign.campaignType === CAMPAIGN_TYPE.PAID && campaign.budget < minBudget) {
+    throw ApiError.badRequest(
+      `The minimum campaign budget is ${formatRupees(minBudget)}. Your budget is ${formatRupees(campaign.budget)} — increase the cost per influencer or the number of influencers.`,
+      [],
+      'CAMPAIGN_BUDGET_TOO_LOW'
+    );
+  }
 }
 
-// --- Final step: go live. No fee — publishing itself is free. What DOES
-// happen here: (1) the brand's plan campaign-post quota is CHECKED
-// up front (throws early if exhausted, before any write happens), (2)
-// the campaign is stamped with the visibility tier / featured flag /
-// early-access cutoff that flow from their plan, (3) the quota slot is
-// only actually consumed (finalizeBrandCampaignUsage) after the campaign
-// and brand doc have both saved successfully — so a save failure midway
-// never burns a slot the brand didn't get. Escrow only comes into play
-// later, when the brand accepts a creator's bid (see
-// initiateEscrowFunding/verifyEscrowPayment below). ---
+async function notifyAdmins(payload) {
+  const admins = await User.find({ role: ROLES.ADMIN }).select('_id');
+  for (const admin of admins) {
+    // eslint-disable-next-line no-await-in-loop
+    await notificationService.notify({ userId: admin._id, ...payload }).catch(() => {});
+  }
+}
+
+// --- Final step. The plan's campaign quota is checked first; the campaign
+// is then either sent to admin review (default) or goes live straight
+// away when approval is switched off in Site Settings. The quota slot is
+// consumed only after everything saved; if an admin rejects the campaign
+// the slot is given back. ---
 const publishCampaign = catchAsync(async (req, res) => {
   const campaign = await Campaign.findById(req.params.id).populate('brand');
   if (!campaign) throw ApiError.notFound('Campaign not found');
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
   if (campaign.status !== CAMPAIGN_STATUS.DRAFT) throw ApiError.conflict('This campaign has already been published');
 
-  assertPublishable(campaign);
+  const settings = await SiteSettings.getSingleton();
+  assertPublishable(campaign, settings);
 
   const { sub: brandSub, plan: brandPlan } = await subscriptionService.checkBrandCampaignQuota(req.user._id);
-  const settings = await SiteSettings.getSingleton();
+  const needsReview = settings.requireCampaignApproval !== false;
 
   campaign.status = CAMPAIGN_STATUS.OPEN;
-  campaign.publishedAt = new Date();
   campaign.visibilityTier = brandPlan.campaignVisibilityTier;
   campaign.isFeatured = brandPlan.isFeaturedListing;
-  campaign.publicVisibleAt = new Date(Date.now() + settings.creatorEarlyAccessHours * 3600 * 1000);
+  campaign.submittedForReviewAt = new Date();
+  campaign.rejectionReason = '';
+  if (needsReview) {
+    campaign.approvalStatus = 'pending';
+    campaign.publishedAt = null;
+    campaign.publicVisibleAt = null;
+  } else {
+    campaign.approvalStatus = 'approved';
+    campaign.reviewedAt = new Date();
+    campaign.publishedAt = new Date();
+    campaign.publicVisibleAt = new Date(Date.now() + settings.creatorEarlyAccessHours * 3600 * 1000);
+  }
   await campaign.save();
 
   campaign.brand.totalCampaigns += 1;
@@ -279,17 +315,27 @@ const publishCampaign = catchAsync(async (req, res) => {
   // Only consume the slot now that publish has fully succeeded.
   await subscriptionService.finalizeBrandCampaignUsage(brandSub);
 
-  return new ApiResponse(200, campaign, 'Campaign published').send(res);
+  if (needsReview) {
+    notifyAdmins({
+      fromUser: req.user._id,
+      type: 'campaign_update',
+      title: 'Campaign waiting for review',
+      message: `${campaign.brand.companyName || 'A brand'} submitted "${campaign.title}" (${formatRupees(campaign.budget)}).`,
+      relatedModel: 'Campaign',
+      relatedId: campaign._id,
+    }).catch(() => {});
+  }
+
+  return new ApiResponse(
+    200,
+    campaign,
+    needsReview ? 'Campaign submitted — it goes live once our team approves it' : 'Campaign published'
+  ).send(res);
 });
 
-// --- A creator applying is gated by two subscription checks up front
-// (exclusive-campaign access, early-access timing — unchanged), then the
-// proposal quota is CHECKED (read-only) before the Application is
-// created. The quota/wallet is only actually consumed
-// (finalizeCreatorProposal) after the Application and the campaign's
-// applicantCount have both saved — if that finalize step throws (e.g. a
-// wallet-debit race), the Application and applicantCount bump are rolled
-// back so nothing is left half-charged. ---
+// --- A creator applying is gated by subscription checks up front, then
+// the proposal quota is CHECKED before the Application is created and
+// only consumed after everything saved (rolled back if charging fails). ---
 const applyToCampaign = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can apply to campaigns');
 
@@ -297,15 +343,19 @@ const applyToCampaign = catchAsync(async (req, res) => {
 
   const campaign = await Campaign.findById(req.params.id);
   if (!campaign) throw ApiError.notFound('Campaign not found');
+  if (!isApproved(campaign)) throw ApiError.notFound('Campaign not found');
   if (campaign.status !== CAMPAIGN_STATUS.OPEN) throw ApiError.badRequest('This campaign is no longer accepting applications');
 
-  // Fix: a campaign with an assignedCreator was still technically
-  // "open" status-wise, so a brand new creator could apply (and their
-  // card would just always render "Not selected" with no way to ever
-  // be accepted) — this blocks it outright with a clear reason instead
-  // of a silent dead-end application.
   if (campaign.assignedCreator) {
     throw ApiError.conflict('This campaign has already been allotted to a creator.');
+  }
+
+  // A quote below the platform minimum would drop the campaign under it.
+  if (campaign.campaignType === CAMPAIGN_TYPE.PAID && quotedAmount != null && quotedAmount > 0) {
+    const settings = await SiteSettings.getSingleton();
+    if (quotedAmount < settings.minCampaignBudget) {
+      throw ApiError.badRequest(`Your quote must be at least ${formatRupees(settings.minCampaignBudget)}.`);
+    }
   }
 
   const creatorPlan = await subscriptionService.getCreatorPlanFields(req.user._id);
@@ -322,10 +372,6 @@ const applyToCampaign = catchAsync(async (req, res) => {
     throw ApiError.conflict('This campaign has reached its applicant limit.');
   }
 
-  // Point 11: daily applicant cap (Pro/Exclusive brands only, set via
-  // updateDraftCampaign above). Computed dynamically against today's
-  // applications rather than a stored counter, so there's nothing to
-  // reset or drift — "today" is the server's local calendar day.
   if (campaign.dailyApplicantLimit != null) {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -344,7 +390,6 @@ const applyToCampaign = catchAsync(async (req, res) => {
   const existing = await Application.findOne({ campaign: campaign._id, creator: creator._id });
   if (existing) throw ApiError.conflict('You have already applied to this campaign');
 
-  // Check quota before creating anything — throws early with no cleanup needed.
   const { needsExtraCharge } = await subscriptionService.checkCreatorProposalQuota(req.user._id);
 
   const application = await Application.create({
@@ -359,9 +404,6 @@ const applyToCampaign = catchAsync(async (req, res) => {
   campaign.applicantCount += 1;
   await campaign.save();
 
-  // Only now — application + count both confirmed saved — actually
-  // consume the quota / charge the extra-proposal fee. If this fails,
-  // roll back the application and count so nothing is left inconsistent.
   try {
     await subscriptionService.finalizeCreatorProposal(req.user._id, needsExtraCharge);
   } catch (err) {
@@ -373,7 +415,6 @@ const applyToCampaign = catchAsync(async (req, res) => {
 
   const brandProfile = await BrandProfile.findById(campaign.brand).select('user');
   await notificationService.notify({
-    // campaign.brand is the BrandProfile id — notify the brand's user.
     userId: brandProfile?.user,
     type: 'proposal_received',
     title: 'New proposal received',
@@ -385,12 +426,7 @@ const applyToCampaign = catchAsync(async (req, res) => {
   return new ApiResponse(201, application, 'Proposal sent').send(res);
 });
 
-// --- Point 8: rule-based "AI-suggested" campaigns for Pro/Exclusive
-// creators only. No LLM call — this scores each open, not-yet-applied
-// campaign against the creator's own profile (category, location,
-// skills) and returns the top matches. Hard filters (follower minimum,
-// applicant limit, early-access timing) exclude a campaign entirely;
-// the score below only ranks what's left. ---
+// --- Rule-based "AI-suggested" campaigns for Pro/Exclusive creators. ---
 const getSuggestedCampaigns = catchAsync(async (req, res) => {
   const creatorPlan = await subscriptionService.getCreatorPlanFields(req.user._id);
   if (creatorPlan.campaignAccessTier !== CREATOR_CAMPAIGN_ACCESS.ALL) {
@@ -406,9 +442,8 @@ const getSuggestedCampaigns = catchAsync(async (req, res) => {
 
   const appliedCampaignIds = await Application.find({ creator: creator._id }).distinct('campaign');
 
-  // Hard filters, applied as a DB query (not post-fetch) so pagination-free
-  // scoring below only ever runs over campaigns the creator could actually apply to.
   const candidateFilter = {
+    ...PUBLICLY_APPROVED,
     status: CAMPAIGN_STATUS.OPEN,
     _id: { $nin: appliedCampaignIds },
     $or: [{ minFollowers: null }, { minFollowers: { $lte: creator.followerCount || 0 } }],
@@ -421,7 +456,7 @@ const getSuggestedCampaigns = catchAsync(async (req, res) => {
     .populate({ path: 'brand', populate: { path: 'user', select: 'name avatarUrl' } })
     .populate('category', 'label icon')
     .sort({ createdAt: -1 })
-    .limit(200); // cap the scoring pool so this stays fast even with many open campaigns
+    .limit(200);
 
   const creatorSkills = (creator.skills || []).map((s) => s.toLowerCase());
   const creatorLocation = (creator.location || '').toLowerCase();
@@ -525,20 +560,14 @@ const decideApplication = catchAsync(async (req, res) => {
   if (decision === 'accepted') {
     campaign.assignedCreator = application.creator;
 
-    // Bug fix: if the creator quoted a different (usually lower) amount
-    // than the brand's posted budget, that quote is what they actually
-    // agreed to work for — milestones must split THAT amount, not the
-    // original posted budget. Without this, a creator who bid ₹8 on a
-    // ₹12 campaign still ends up with milestones totalling ₹12.
+    // The creator's quote (if any) is what they agreed to work for —
+    // milestones split THAT amount, not the original posted budget.
     if (campaign.campaignType === CAMPAIGN_TYPE.PAID && application.quotedAmount != null && application.quotedAmount > 0) {
       campaign.budget = application.quotedAmount;
     }
 
     await campaign.save();
 
-    // Point 12: milestone-based escrow only applies to paid campaigns —
-    // a barter campaign has no cash budget to split into an
-    // advance/final payment, so there's nothing to create here.
     if (campaign.campaignType === CAMPAIGN_TYPE.PAID && campaign.budget > 0) {
       await milestoneService.createInitialMilestones(campaign);
     }
@@ -582,7 +611,7 @@ const getSavedCampaigns = catchAsync(async (req, res) => {
     populate: [{ path: 'brand', populate: { path: 'user', select: 'name avatarUrl' } }, { path: 'category', select: 'label icon' }],
   });
 
-  return new ApiResponse(200, user.savedCampaigns, 'Saved opportunities fetched').send(res);
+  return new ApiResponse(200, user.savedCampaigns.filter((c) => c && isApproved(c)), 'Saved opportunities fetched').send(res);
 });
 
 const initiateEscrowFunding = catchAsync(async (req, res) => {
@@ -660,6 +689,7 @@ const approveWork = catchAsync(async (req, res) => {
 });
 
 module.exports = {
+  getCampaignRules,
   listCampaigns,
   getSuggestedCampaigns,
   getCampaignById,
@@ -680,4 +710,5 @@ module.exports = {
   verifyEscrowPayment,
   submitWork,
   approveWork,
+  PUBLICLY_APPROVED,
 };

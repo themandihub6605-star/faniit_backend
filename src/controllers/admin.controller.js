@@ -545,6 +545,12 @@ const updateSiteSettings = catchAsync(async (req, res) => {
   if (maintenanceMessage !== undefined) settings.maintenanceMessage = maintenanceMessage;
   if (homepageBannerText !== undefined) settings.homepageBannerText = homepageBannerText;
   if (creatorEarlyAccessHours !== undefined) settings.creatorEarlyAccessHours = creatorEarlyAccessHours;
+  if (req.body.minCampaignBudget !== undefined) {
+    const value = Number(req.body.minCampaignBudget);
+    if (!Number.isFinite(value) || value < 0) throw ApiError.badRequest('Minimum campaign budget must be 0 or more');
+    settings.minCampaignBudget = Math.round(value);
+  }
+  if (req.body.requireCampaignApproval !== undefined) settings.requireCampaignApproval = Boolean(req.body.requireCampaignApproval);
 
   await settings.save();
   return new ApiResponse(200, settings, 'Site settings updated').send(res);

@@ -84,7 +84,9 @@ const getBrandBySlug = catchAsync(async (req, res) => {
   if (!brand) throw ApiError.notFound('Brand not found');
 
   const campaignsPosted = await Campaign.countDocuments({ brand: brand._id });
-  const campaigns = await Campaign.find({ brand: brand._id, status: 'open' }).sort({ createdAt: -1 }).limit(6);
+  const campaigns = await Campaign.find({ brand: brand._id, status: 'open', approvalStatus: { $nin: ['pending', 'rejected'] } })
+    .sort({ createdAt: -1 })
+    .limit(6);
 
   // Plan badge info for this profile — same defaulting as listBrands (no
   // UserSubscription row yet = implicitly Lite). Used by the frontend to

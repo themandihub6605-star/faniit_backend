@@ -22,6 +22,12 @@ async function start() {
   setTimeout(sweep, 30 * 1000);
   setInterval(sweep, AUTO_RELEASE_INTERVAL_MS);
 
+  // Admin broadcasts: sends scheduled notifications when they're due.
+  require('./src/services/broadcast.service').startScheduler();
+
+  // Fanitt Store: call timeouts, auto-ending calls and stale lives.
+  require('./src/FanittStore').startJobs();
+
   process.on('unhandledRejection', (err) => {
     console.error('[server] Unhandled rejection:', err.message);
     server.close(() => process.exit(1));

@@ -40,6 +40,13 @@ module.exports = {
     hostEmail: process.env.ZOOM_HOST_EMAIL,
   },
 
+  // Fanitt Store live streams and calls (LiveKit Cloud → Settings → Keys)
+  livekit: {
+    url: process.env.LIVEKIT_URL, // wss://<project>.livekit.cloud
+    apiKey: process.env.LIVEKIT_API_KEY,
+    apiSecret: process.env.LIVEKIT_API_SECRET,
+  },
+
   uploadDir: process.env.UPLOAD_DIR || 'uploads',
 
   cloudinary: {
@@ -63,6 +70,9 @@ module.exports = {
       // (enable "Public Access" on the bucket to get one) or your own
       // custom domain connected to the bucket. No trailing slash.
       publicUrl: process.env.R2_PUBLIC_URL,
+      // Optional private bucket (no public access) for Fanitt Store product
+      // files and KYC documents. Falls back to R2_BUCKET_NAME when empty.
+      privateBucketName: process.env.R2_PRIVATE_BUCKET_NAME || '',
     },
     // Stream (video) — API Tokens page, needs Stream:Edit permission
     streamApiToken: process.env.CLOUDFLARE_STREAM_API_TOKEN,

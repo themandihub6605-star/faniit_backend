@@ -1,80 +1,57 @@
-const { Gift, CreatorProfile, Transaction } = require('../models');
-const paymentService = require('../services/payment.service');
-const walletService = require('../services/wallet.service');
-const notificationService = require('../services/notification.service');
+const { Gift } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/enums');
 
-const createGiftOrder = catchAsync(async (req, res) => {
-  const { creatorId, amount, message } = req.body;
-  if (!amount || amount <= 0) throw ApiError.badRequest('Invalid gift amount');
+// FanBox (gifts). The old endpoints keep the same request/response shape
+// for existing website/app builds, but now run through the Fanitt Store
+// FanBox flow (src/FanittStore/services/fanbox.service.js), which:
+//  - binds the amount to the Razorpay order (the app can't change it),
+//  - credits each payment exactly once,
+//  - applies the FanBox fee set in the admin panel.
 
-  const creator = await CreatorProfile.findById(creatorId);
-  if (!creator) throw ApiError.notFound('Creator not found');
-
-  const order = await paymentService.createOrder(amount, `gift_${creatorId}_${Date.now()}`, {
-    creatorId,
-    fromUser: String(req.user._id),
-    message: message || '',
-  });
-
-  return new ApiResponse(200, { order }, 'Complete payment to send your FanBox gift').send(res);
+// Lazy requires: the store module registers its own models on load.
+const store = () => ({
+  fanbox: require('../FanittStore/services/fanbox.service'),
+  orders: require('../FanittStore/services/order.service'),
+  models: require('../FanittStore/models'),
 });
 
+/** POST /api/gifts/create-order { creatorId, amount, message } */
+const createGiftOrder = catchAsync(async (req, res) => {
+  const { creatorId, amount, message } = req.body;
+  const value = Number(amount);
+  if (!Number.isInteger(value) || value <= 0) throw ApiError.badRequest('Invalid gift amount');
+
+  const result = await store().fanbox.startFanBox(req.user, { creatorId, amount: value, message, context: 'profile' });
+  if (result.paid) {
+    // Only happens for wallet payments, which this old endpoint never requests.
+    return new ApiResponse(201, { order: null, storeOrderId: result.order._id, paid: true }, 'FanBox sent').send(res);
+  }
+  return new ApiResponse(
+    200,
+    {
+      // Same shape as before: a Razorpay order the checkout opens.
+      order: { id: result.razorpay.orderId, amount: result.razorpay.amount, currency: result.razorpay.currency },
+      storeOrderId: result.order._id,
+      keyId: result.razorpay.keyId,
+    },
+    'Complete payment to send your FanBox gift'
+  ).send(res);
+});
+
+/** POST /api/gifts/verify { razorpayOrderId, razorpayPaymentId, razorpaySignature } */
 const verifyGift = catchAsync(async (req, res) => {
-  const { creatorId, message, razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  const { razorpayOrderId, razorpayPaymentId, razorpaySignature } = req.body;
+  if (!razorpayOrderId || !razorpayPaymentId || !razorpaySignature) throw ApiError.badRequest('Payment details are missing');
 
-  const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
-  if (!isValid) throw ApiError.badRequest('Payment verification failed');
+  const { StoreOrder } = store().models;
+  const order = await StoreOrder.findOne({ razorpayOrderId, buyer: req.user._id, itemType: 'fanbox' });
+  if (!order) throw ApiError.notFound('Gift order not found');
 
-  // Amount comes from Razorpay, never from the client; ids can't be reused.
-  const { amount } = await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
-
-  const creator = await CreatorProfile.findById(creatorId).populate('user');
-  if (!creator) throw ApiError.notFound('Creator not found');
-
-  const { platformCommission, agencyCommission, referralCommission, netAmount } = await walletService.splitEarnings(
-    amount,
-    creator._id,
-    null,
-    null
-  );
-
-  const transaction = await Transaction.create({
-    type: TRANSACTION_TYPE.GIFT,
-    status: TRANSACTION_STATUS.SUCCESS,
-    from: req.user._id,
-    to: creator.user._id,
-    amount,
-    platformCommission,
-    agencyCommission,
-    referralCommission,
-    netAmount,
-    razorpayOrderId,
-    razorpayPaymentId,
-    razorpaySignature,
-  });
-
-  await walletService.creditCreator(creator._id, netAmount);
-
-  const gift = await Gift.create({
-    fromUser: req.user._id,
-    toCreator: creator._id,
-    amount,
-    message,
-    transaction: transaction._id,
-  });
-
-  await notificationService.notify({
-    userId: creator.user._id,
-    type: 'gift_received',
-    title: 'You received a FanBox gift!',
-    message: `₹${(netAmount / 100).toLocaleString('en-IN')} from a fan${message ? `: "${message}"` : '.'}`,
-  });
-
-  return new ApiResponse(201, gift, 'Gift sent').send(res);
+  const paid = await store().orders.verifyPayment(req.user._id, order._id, { razorpayOrderId, razorpayPaymentId, razorpaySignature });
+  const gift = paid.transaction ? await Gift.findOne({ transaction: paid.transaction }) : null;
+  return new ApiResponse(201, gift || { _id: paid._id, amount: paid.amount, message: paid.message }, 'Gift sent').send(res);
 });
 
 const getCreatorGifts = catchAsync(async (req, res) => {

@@ -52,6 +52,9 @@ app.post(
   handleWebhook
 );
 
+// --- Fanitt Store: LiveKit webhook, also verified against the RAW body ---
+app.post('/api/store/livekit/webhook', express.raw({ type: '*/*', limit: '1mb' }), require('./FanittStore').liveKitWebhook);
+
 // --- standard body parsing for everything else ---
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
