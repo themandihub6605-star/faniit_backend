@@ -1,6 +1,5 @@
 const { Session, CreatorProfile, Booking, User } = require('../models');
 const zoomService = require('../services/zoom.service');
-const env = require('../config/env');
 const { sendSessionCancelledEmail } = require('../services/email.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
@@ -21,7 +20,11 @@ const listSessions = catchAsync(async (req, res) => {
   if (category) filter.category = category;
   if (type) filter.type = type;
   if (free === 'true') filter.type = SESSION_TYPES.FREE;
-  if (upcoming === 'true') filter.scheduledAt = { $gte: new Date() };
+  // Keep meetings that already started (live or within their time) in the list.
+  if (upcoming === 'true') {
+    filter.isCompleted = { $ne: true };
+    filter.scheduledAt = { $gte: new Date(Date.now() - 6 * 60 * 60 * 1000) };
+  }
 
   const sessions = await Session.find(filter)
     .populate({ path: 'creator', populate: { path: 'user', select: 'name avatarUrl' } })
@@ -52,19 +55,8 @@ const createSession = catchAsync(async (req, res) => {
 
   const { title, description, category, type, price, scheduledAt, durationMinutes, maxParticipants, coverImageUrl } = req.body;
 
-  let zoomDetails = { zoomMeetingId: '', zoomJoinUrl: '', zoomStartUrl: '', zoomPassword: '' };
-  try {
-    zoomDetails = await zoomService.createMeeting({
-      topic: title,
-      startTime: scheduledAt,
-      durationMinutes,
-      hostEmail: env.zoom.hostEmail,
-    });
-  } catch (err) {
-    console.error('[zoom] meeting creation failed:', err.message);
-    throw ApiError.internal(`Could not create the Zoom meeting: ${err.message}`);
-  }
-
+  // Meetings run in-app on LiveKit (src/FanittStore/services/meetRoom.service.js),
+  // so no Zoom meeting is created any more.
   const session = await Session.create({
     creator: creator._id,
     title,
@@ -76,7 +68,6 @@ const createSession = catchAsync(async (req, res) => {
     durationMinutes,
     maxParticipants,
     coverImageUrl: coverImageUrl || '',
-    ...zoomDetails,
   });
 
   return new ApiResponse(201, session, 'Session created').send(res);
@@ -128,16 +119,17 @@ const cancelSession = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Session cancelled').send(res);
 });
 
+// Old Zoom join (kept only for sessions created before the switch to
+// in-app meetings). New meetings join through POST /api/store/meets/:id/join.
 const getJoinToken = catchAsync(async (req, res) => {
   const session = await Session.findById(req.params.id).select('+zoomPassword').populate('creator');
   if (!session) throw ApiError.notFound('Session not found');
-  if (!session.zoomMeetingId) throw ApiError.badRequest('This session has no live meeting provisioned yet');
+  if (!session.zoomMeetingId) throw ApiError.badRequest('This meeting runs inside the Fanitt app — open it from Virtual Meets');
 
   const isHost = session.creator.user.equals(req.user._id);
 
   // Only the host and people with a confirmed booking may join.
   if (!isHost) {
-    const { Booking } = require('../models');
     const booked = await Booking.exists({
       session: session._id,
       user: req.user._id,
@@ -160,7 +152,6 @@ const goLive = catchAsync(async (req, res) => {
   const session = await Session.findById(req.params.id).populate('creator');
   if (!session) throw ApiError.notFound('Session not found');
   if (!session.creator.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this session');
-  if (!session.zoomMeetingId) throw ApiError.badRequest('This session has no live meeting provisioned yet');
   if (session.isCancelled) throw ApiError.badRequest('This session was cancelled');
 
   session.isLive = true;

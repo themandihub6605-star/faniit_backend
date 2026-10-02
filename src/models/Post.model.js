@@ -8,6 +8,8 @@ const mediaItemSchema = new mongoose.Schema(
   {
     url: { type: String, required: true },
     type: { type: String, enum: ['image', 'video'], required: true },
+    // Width ÷ height, so the feed can show each item in its real shape.
+    aspectRatio: { type: Number, default: null, min: 0.2, max: 5 },
   },
   { _id: false }
 );
@@ -27,6 +29,8 @@ const postSchema = new mongoose.Schema(
     caption: { type: String, maxlength: 500, default: '' },
 
     likedBy: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    // People who saved the post (private — only used to show "Saved" to each user).
+    savedBy: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: [] },
     likeCount: { type: Number, default: 0 },
   },
   { timestamps: true }
@@ -34,5 +38,6 @@ const postSchema = new mongoose.Schema(
 
 postSchema.index({ creator: 1, createdAt: -1 });
 postSchema.index({ createdAt: -1 });
+postSchema.index({ savedBy: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Post', postSchema);

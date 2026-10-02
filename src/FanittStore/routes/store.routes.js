@@ -26,6 +26,10 @@ router.get('/stores/:slugOrUserId', optionalAuth, shop.getStore);
 router.get('/products/:id', optionalAuth, shop.getProduct);
 router.get('/lives', live.listLives);
 router.get('/lives/:id', optionalAuth, live.getLive);
+router.get('/meets', optionalAuth, meet.listMeets);
+router.get('/meets/:id', optionalAuth, meet.getMeet);
+router.post('/meets/:id/join', protect, meet.joinMeet);
+router.post('/meets/:id/end', protect, meet.endMeet);
 router.get('/go/:id', optionalAuth, affiliate.go);
 router.get('/fanbox/config', fanbox.getConfig);
 

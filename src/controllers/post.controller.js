@@ -23,10 +23,21 @@ const createPost = catchAsync(async (req, res) => {
     throw ApiError.badRequest(`You've reached the limit of ${MAX_POSTS_PER_CREATOR} posts. Delete an old one to add a new one.`);
   }
 
-  const mediaItems = files.map((file) => ({
-    url: file.path,
-    type: file.mimetype.startsWith('video') ? 'video' : 'image',
-  }));
+  // Optional: the app sends each item's width ÷ height (same order as the files).
+  let ratios = [];
+  try {
+    ratios = JSON.parse(req.body.aspectRatios || '[]');
+  } catch {
+    ratios = [];
+  }
+  const mediaItems = files.map((file, i) => {
+    const ratio = Number(ratios[i]);
+    return {
+      url: file.path,
+      type: file.mimetype.startsWith('video') ? 'video' : 'image',
+      aspectRatio: Number.isFinite(ratio) && ratio >= 0.2 && ratio <= 5 ? Math.round(ratio * 1000) / 1000 : null,
+    };
+  });
 
   const post = await Post.create({
     creator: creator._id,
@@ -48,6 +59,14 @@ function withFollowFlag(posts, userId) {
       ...post,
       creator: { _id: creator._id, slug: creator.slug, user: creator.user, isFollowing },
     };
+  });
+}
+
+// Adds isSaved for the current user and never sends the savedBy list.
+function withSavedFlag(posts, userId) {
+  return posts.map((post) => {
+    const { savedBy, ...rest } = post;
+    return { ...rest, isSaved: !!(userId && (savedBy || []).some((id) => id.toString() === userId)) };
   });
 }
 
@@ -87,7 +106,7 @@ const getCreatorPosts = catchAsync(async (req, res) => {
   const userId = req.user?._id?.toString();
   const withFollow = withFollowFlag(posts, userId);
   const withLikes = await withLikePreview(withFollow);
-  return new ApiResponse(200, withLikes, 'Posts fetched').send(res);
+  return new ApiResponse(200, withSavedFlag(withLikes, userId), 'Posts fetched').send(res);
 });
 
 const getMyPosts = catchAsync(async (req, res) => {
@@ -96,7 +115,7 @@ const getMyPosts = catchAsync(async (req, res) => {
   const creator = await CreatorProfile.findOne({ user: req.user._id });
   if (!creator) throw ApiError.notFound('Creator profile not found');
 
-  const posts = await Post.find({ creator: creator._id }).sort({ createdAt: -1 });
+  const posts = await Post.find({ creator: creator._id }).select('-savedBy').sort({ createdAt: -1 });
   return new ApiResponse(200, posts, 'Your posts fetched').send(res);
 });
 
@@ -112,7 +131,30 @@ const getFeed = catchAsync(async (req, res) => {
   const userId = req.user?._id?.toString();
   const withFollow = withFollowFlag(posts, userId);
   const withLikes = await withLikePreview(withFollow);
-  return new ApiResponse(200, withLikes, 'Feed fetched').send(res);
+  return new ApiResponse(200, withSavedFlag(withLikes, userId), 'Feed fetched').send(res);
+});
+
+// GET /posts/saved — posts the current user saved, newest first.
+const getSavedPosts = catchAsync(async (req, res) => {
+  const posts = await Post.find({ savedBy: req.user._id })
+    .populate({ path: 'creator', populate: { path: 'user', select: 'name avatarUrl' }, select: 'slug user followers' })
+    .sort({ createdAt: -1 })
+    .limit(100)
+    .lean();
+
+  const userId = req.user._id.toString();
+  const withFollow = withFollowFlag(posts, userId);
+  const withLikes = await withLikePreview(withFollow);
+  return new ApiResponse(200, withSavedFlag(withLikes, userId), 'Saved posts fetched').send(res);
+});
+
+// POST /posts/:id/save — save or unsave a post.
+const toggleSave = catchAsync(async (req, res) => {
+  const post = await Post.findById(req.params.id).select('_id savedBy');
+  if (!post) throw ApiError.notFound('Post not found');
+  const alreadySaved = post.savedBy.some((id) => id.equals(req.user._id));
+  await Post.updateOne({ _id: post._id }, alreadySaved ? { $pull: { savedBy: req.user._id } } : { $addToSet: { savedBy: req.user._id } });
+  return new ApiResponse(200, { saved: !alreadySaved }, alreadySaved ? 'Removed from saved' : 'Saved').send(res);
 });
 
 const toggleLike = catchAsync(async (req, res) => {
@@ -173,4 +215,4 @@ const deletePost = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Post deleted').send(res);
 });
 
-module.exports = { createPost, getCreatorPosts, getMyPosts, getFeed, toggleLike, getPostLikes, updatePost, deletePost, MAX_POSTS_PER_CREATOR };
+module.exports = { createPost, getCreatorPosts, getMyPosts, getFeed, getSavedPosts, toggleLike, toggleSave, getPostLikes, updatePost, deletePost, MAX_POSTS_PER_CREATOR };
