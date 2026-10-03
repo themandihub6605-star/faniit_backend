@@ -3,7 +3,7 @@ const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
 const ApiError = require('../../utils/apiError');
 const { Store, DigitalProduct, StoreOrder, LiveStream } = require('../models');
-const { STORE_STATUS, PRODUCT_STATUS, ORDER_STATUS, ORDER_ITEM, LIVE_STATUS, LIVE_VISIBILITY } = require('../constants');
+const { STORE_STATUS, PRODUCT_STATUS, ORDER_STATUS, ORDER_ITEM, LIVE_STATUS, LIVE_VISIBILITY, PRODUCT_CATEGORIES } = require('../constants');
 const settingsService = require('../services/settings.service');
 const orderService = require('../services/order.service');
 const invoiceService = require('../services/invoice.service');
@@ -41,6 +41,63 @@ const listStores = catchAsync(async (req, res) => {
     Store.countDocuments(filter),
   ]);
   return new ApiResponse(200, { stores: stores.map(publicStore), total, page, pages: Math.ceil(total / limit) }, 'Stores fetched').send(res);
+});
+
+const PRODUCT_SORTS = {
+  new: { publishedAt: -1, _id: -1 },
+  popular: { salesCount: -1, publishedAt: -1 },
+  price_low: { price: 1, publishedAt: -1 },
+  price_high: { price: -1, publishedAt: -1 },
+};
+
+/**
+ * GET /api/store/products?search=&category=&price=free|paid&sort=new|popular|price_low|price_high&page=
+ * Every live product from every open store — the marketplace.
+ */
+const listProducts = catchAsync(async (req, res) => {
+  const { page, limit, skip } = pageParams(req.query);
+  const stores = await Store.find({ status: STORE_STATUS.ACTIVE, isOpen: true }).select('_id name slug logoUrl');
+  const storeMap = new Map(stores.map((s) => [String(s._id), s]));
+
+  const filter = { status: PRODUCT_STATUS.PUBLISHED, store: { $in: stores.map((s) => s._id) } };
+  const search = String(req.query.search || '').trim();
+  if (search) {
+    const pattern = new RegExp(escapeRegex(search), 'i');
+    filter.$or = [{ title: pattern }, { description: pattern }];
+  }
+  if (PRODUCT_CATEGORIES.includes(req.query.category)) filter.category = req.query.category;
+  if (req.query.price === 'free') filter.price = 0;
+  if (req.query.price === 'paid') filter.price = { $gt: 0 };
+  const sort = PRODUCT_SORTS[req.query.sort] || PRODUCT_SORTS.new;
+
+  const [products, total] = await Promise.all([
+    DigitalProduct.find(filter).sort(sort).skip(skip).limit(limit),
+    DigitalProduct.countDocuments(filter),
+  ]);
+
+  let ownedIds = [];
+  if (req.user && products.length) {
+    ownedIds = await StoreOrder.distinct('itemId', { buyer: req.user._id, status: ORDER_STATUS.PAID, itemId: { $in: products.map((p) => p._id) } });
+  }
+  const owned = new Set(ownedIds.map(String));
+
+  return new ApiResponse(
+    200,
+    {
+      products: products.map((p) => {
+        const s = storeMap.get(String(p.store));
+        return {
+          ...serializeProduct(p),
+          owned: owned.has(String(p._id)),
+          store: s ? { _id: s._id, name: s.name, slug: s.slug, logoUrl: s.logoUrl } : null,
+        };
+      }),
+      total,
+      page,
+      pages: Math.ceil(total / limit),
+    },
+    'Products fetched'
+  ).send(res);
 });
 
 async function findVisibleStore(slugOrUserId) {
@@ -219,6 +276,7 @@ const getInvoiceHtml = catchAsync(async (req, res) => {
 module.exports = {
   getConfig,
   listStores,
+  listProducts,
   getStore,
   getProduct,
   checkout,

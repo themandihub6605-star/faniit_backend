@@ -23,6 +23,7 @@ const image = uploadImage('fanitt/store').single('image');
 router.get('/config', shop.getConfig);
 router.get('/stores', shop.listStores);
 router.get('/stores/:slugOrUserId', optionalAuth, shop.getStore);
+router.get('/products', optionalAuth, shop.listProducts);
 router.get('/products/:id', optionalAuth, shop.getProduct);
 router.get('/lives', live.listLives);
 router.get('/lives/:id', optionalAuth, live.getLive);

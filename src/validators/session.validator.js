@@ -13,4 +13,18 @@ const createSessionSchema = z.object({
   coverImageUrl: z.string().optional(),
 });
 
-module.exports = { createSessionSchema };
+// Editing a session: only these fields. Price and type can't change after
+// people may have booked. A new scheduledAt postpones the session.
+const updateSessionSchema = z
+  .object({
+    title: z.string().min(3).max(120).optional(),
+    description: z.string().max(1000).optional(),
+    scheduledAt: z.string().datetime({ message: 'scheduledAt must be a valid ISO date' }).optional(),
+    durationMinutes: z.number().min(5).max(480).optional(),
+    maxParticipants: z.number().min(1).max(10000).optional(),
+    coverImageUrl: z.string().optional(),
+    rescheduleNote: z.string().max(300).optional(),
+  })
+  .strict();
+
+module.exports = { createSessionSchema, updateSessionSchema };

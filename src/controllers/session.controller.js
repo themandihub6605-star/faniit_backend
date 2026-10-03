@@ -1,6 +1,8 @@
 const { Session, CreatorProfile, Booking, User } = require('../models');
 const zoomService = require('../services/zoom.service');
+const env = require('../config/env');
 const { sendSessionCancelledEmail } = require('../services/email.service');
+const notificationService = require('../services/notification.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -73,15 +75,61 @@ const createSession = catchAsync(async (req, res) => {
   return new ApiResponse(201, session, 'Session created').send(res);
 });
 
+// Edit a session: title, description, cover, length, seats — or postpone it
+// with a new date/time. Everyone who booked is told about a new time.
 const updateSession = catchAsync(async (req, res) => {
-  const session = await Session.findById(req.params.id).populate('creator');
+  const session = await Session.findById(req.params.id).populate({ path: 'creator', populate: { path: 'user', select: 'name' } });
   if (!session) throw ApiError.notFound('Session not found');
-  if (!session.creator.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this session');
+  if (!session.creator.user._id.equals(req.user._id)) throw ApiError.forbidden('You do not own this session');
+  if (session.isCancelled || session.isCompleted) throw ApiError.badRequest('This session can’t be edited any more');
 
-  Object.assign(session, req.body);
+  const { title, description, scheduledAt, durationMinutes, maxParticipants, coverImageUrl, rescheduleNote } = req.body;
+
+  let rescheduled = false;
+  if (scheduledAt !== undefined) {
+    const when = new Date(scheduledAt);
+    if (Number.isNaN(when.getTime()) || when.getTime() < Date.now() + 5 * 60 * 1000) {
+      throw ApiError.badRequest('Pick a new time at least 5 minutes from now');
+    }
+    if (session.isLive) throw ApiError.badRequest('End the live session before moving it');
+    rescheduled = when.getTime() !== new Date(session.scheduledAt).getTime();
+    session.scheduledAt = when;
+  }
+  if (maxParticipants !== undefined && maxParticipants < (session.bookedCount || 0)) {
+    throw ApiError.badRequest(`${session.bookedCount} people already booked — seats can’t go below that`);
+  }
+  if (title !== undefined) session.title = title;
+  if (description !== undefined) session.description = description;
+  if (durationMinutes !== undefined) session.durationMinutes = durationMinutes;
+  if (maxParticipants !== undefined) session.maxParticipants = maxParticipants;
+  if (coverImageUrl !== undefined) session.coverImageUrl = coverImageUrl;
   await session.save();
 
-  return new ApiResponse(200, session, 'Session updated').send(res);
+  if (rescheduled) {
+    try {
+      const bookings = await Booking.find({ session: session._id, status: BOOKING_STATUS.CONFIRMED }).select('user');
+      const when = session.scheduledAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+      await Promise.all(
+        bookings.map((b) =>
+          notificationService
+            .notify({
+              userId: b.user,
+              fromUser: req.user._id,
+              type: 'session_reminder',
+              title: 'Meeting moved to a new time',
+              message: `"${session.title}" by ${session.creator.user.name} is now on ${when}.${rescheduleNote ? ` ${rescheduleNote}` : ''}`,
+              relatedModel: 'Session',
+              relatedId: session._id,
+            })
+            .catch(() => {})
+        )
+      );
+    } catch (err) {
+      console.error('[session.controller] Failed to notify about new time:', err.message);
+    }
+  }
+
+  return new ApiResponse(200, session, rescheduled ? 'Session moved — attendees notified' : 'Session updated').send(res);
 });
 
 // Point-Fix: cancelling a session now emails everyone who'd booked it —
@@ -119,17 +167,16 @@ const cancelSession = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Session cancelled').send(res);
 });
 
-// Old Zoom join (kept only for sessions created before the switch to
-// in-app meetings). New meetings join through POST /api/store/meets/:id/join.
 const getJoinToken = catchAsync(async (req, res) => {
   const session = await Session.findById(req.params.id).select('+zoomPassword').populate('creator');
   if (!session) throw ApiError.notFound('Session not found');
-  if (!session.zoomMeetingId) throw ApiError.badRequest('This meeting runs inside the Fanitt app — open it from Virtual Meets');
+  if (!session.zoomMeetingId) throw ApiError.badRequest('This session has no live meeting provisioned yet');
 
   const isHost = session.creator.user.equals(req.user._id);
 
   // Only the host and people with a confirmed booking may join.
   if (!isHost) {
+    const { Booking } = require('../models');
     const booked = await Booking.exists({
       session: session._id,
       user: req.user._id,
