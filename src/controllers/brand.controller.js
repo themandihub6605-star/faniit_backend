@@ -1,5 +1,6 @@
 const { BrandProfile, Campaign, Transaction, UserSubscription, User } = require('../models');
 const catchAsync = require('../utils/catchAsync');
+const { pinnedIds } = require('../utils/pinnedIds');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const generateSlug = require('../utils/slugify');
@@ -9,6 +10,8 @@ const listBrands = catchAsync(async (req, res) => {
   const { industry, location, search, page = 1, limit = 20 } = req.query;
 
   const filter = { verificationStatus: { $ne: 'rejected' } };
+  const ids = pinnedIds(req.query);
+  if (ids) filter._id = { $in: ids };
   if (industry) filter.industry = new RegExp(industry, 'i');
   if (location) filter.location = new RegExp(location, 'i');
   if (search) {

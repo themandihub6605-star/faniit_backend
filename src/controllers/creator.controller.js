@@ -5,11 +5,14 @@ const ApiError = require('../utils/apiError');
 const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/enums');
 const { VERIFICATION_STATUS } = require('../constants/enums');
 const notificationService = require('../services/notification.service');
+const { pinnedIds } = require('../utils/pinnedIds');
 
 const listCreators = catchAsync(async (req, res) => {
   const { category, location, minFollowers, search, page = 1, limit = 20 } = req.query;
 
   const filter = { verificationStatus: { $ne: 'rejected' } };
+  const ids = pinnedIds(req.query);
+  if (ids) filter._id = { $in: ids };
   if (category) filter.category = category;
   if (location) filter.location = new RegExp(location, 'i');
   if (minFollowers) filter.followerCount = { $gte: Number(minFollowers) };

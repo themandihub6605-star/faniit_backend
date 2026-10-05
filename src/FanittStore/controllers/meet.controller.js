@@ -5,6 +5,7 @@ const ApiError = require('../../utils/apiError');
 const storeService = require('../services/store.service');
 const meetRoom = require('../services/meetRoom.service');
 const { pageParams } = require('../utils/text');
+const { pinnedIds } = require('../../utils/pinnedIds');
 
 // Virtual Meet = the existing Live Sessions feature. Booking and payment
 // keep using /api/bookings; the meeting itself runs in-app on LiveKit
@@ -75,7 +76,11 @@ const listMeets = catchAsync(async (req, res) => {
   const now = Date.now();
   const base = { isCancelled: { $ne: true }, isCompleted: { $ne: true } };
   let filter;
-  if (req.query.tab === 'live') {
+  const ids = pinnedIds(req.query);
+  if (ids) {
+    // Pinned meets (app home) — still only ones that aren't over.
+    filter = { ...base, _id: { $in: ids } };
+  } else if (req.query.tab === 'live') {
     filter = { ...base, isLive: true };
   } else if (req.query.tab === 'booked') {
     if (!req.user) throw ApiError.unauthorized('Log in to see your meetings');

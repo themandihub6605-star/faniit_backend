@@ -26,6 +26,8 @@ router.use('/gifts', require('./gift.routes'));
 router.use('/posts', require('./post.routes'));
 router.use('/wallet', require('./wallet.routes'));
 router.use('/admin', require('./admin.routes'));
+  router.use('/legal', require('./legal.routes'));
+router.use('/home', require('./home.routes'));
 router.use('/subscriptions', require('./subscription.routes'));
 
 // Fanitt Store — all store code lives in src/FanittStore

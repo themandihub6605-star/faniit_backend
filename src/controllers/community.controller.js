@@ -1,6 +1,7 @@
 const { Community, CommunityMembership, CommunityPost, CommunityComment, CommunityMessage, User } = require('../models');
 const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
+const { pinnedIds } = require('../utils/pinnedIds');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const notificationService = require('../services/notification.service');
@@ -125,6 +126,8 @@ const listCommunities = catchAsync(async (req, res) => {
   const { page, limit, skip } = pageParams(req.query);
 
   const filter = {};
+  const ids = pinnedIds(req.query);
+  if (ids) filter._id = { $in: ids };
   if (category) filter.category = category;
   if (featured === 'true') filter.isFeatured = true;
   if (search) {

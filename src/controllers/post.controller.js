@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { Post, CreatorProfile, User } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
@@ -134,6 +135,18 @@ const getFeed = catchAsync(async (req, res) => {
   return new ApiResponse(200, withSavedFlag(withLikes, userId), 'Feed fetched').send(res);
 });
 
+// GET /posts/:id — one post (opened from a shared link).
+const getPost = catchAsync(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.notFound('Post not found');
+  const posts = await Post.find({ _id: req.params.id })
+    .populate({ path: 'creator', populate: { path: 'user', select: 'name avatarUrl' }, select: 'slug user followers' })
+    .lean();
+  if (!posts.length) throw ApiError.notFound('Post not found');
+  const userId = req.user?._id?.toString();
+  const withLikes = await withLikePreview(withFollowFlag(posts, userId));
+  return new ApiResponse(200, withSavedFlag(withLikes, userId)[0], 'Post fetched').send(res);
+});
+
 // GET /posts/saved — posts the current user saved, newest first.
 const getSavedPosts = catchAsync(async (req, res) => {
   const posts = await Post.find({ savedBy: req.user._id })
@@ -215,4 +228,4 @@ const deletePost = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Post deleted').send(res);
 });
 
-module.exports = { createPost, getCreatorPosts, getMyPosts, getFeed, getSavedPosts, toggleLike, toggleSave, getPostLikes, updatePost, deletePost, MAX_POSTS_PER_CREATOR };
+module.exports = { createPost, getCreatorPosts, getMyPosts, getFeed, getSavedPosts, getPost, toggleLike, toggleSave, getPostLikes, updatePost, deletePost, MAX_POSTS_PER_CREATOR };

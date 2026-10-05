@@ -1,0 +1,272 @@
+FANITT TERMS OF USE
+Last Updated: 02/10/2026
+Effective Date: 02/10/2026
+
+These Terms of Use ("Terms") constitute a legally binding agreement between you ("User," "you," or "your") and Rago Vradicals LLP, a Limited Liability Partnership incorporated under the laws of India, having its registered office at House No. 40 & 41, Siddhi Vinayak Colony, Sukhi Sevaniya, Bhopal, Madhya Pradesh 462010, India (LLPIN: ADA-8359; PAN: ABOFR3622G) ("Rago Vradicals," "Company," "we," "us," or "our"), which owns, operates, and is the parent company of the technology platform, brand, mobile application(s), and website(s) operating under the name "Fanitt" (collectively, the "Platform").
+
+Fanitt is used as the brand/trade name under which the Platform is operated and through which contracts are entered into with Users, including those acting as Businesses and Experts/Creators (each as defined below), including individuals, brands, organisations, Outlets, Influencers, Celebrities, Artists, Performers, experts, creators, and other participants. All legal rights, obligations, liabilities, and statutory compliances relating to the Platform vest in, and are reserved to, Rago Vradicals LLP as the parent and operating entity of Fanitt.
+
+Please read these terms carefully before accessing, browsing, registering on, or otherwise using the platform. By creating an account, clicking "I agree," or otherwise accessing or using the platform, you acknowledge that you have read, understood, and agree to be bound by these terms, our privacy policy, cookie policy, refund & cancellation policy, acceptable use policy, the fee, Plan and commission framework at Annexure A, and any category-specific agreement applicable to you (collectively, the "platform policies"), each of which is incorporated herein by reference. If you do not agree to these terms, you must not access or use the platform.
+
+1. Definitions
+In these Terms, unless the context otherwise requires:
+- "Account" means the registered profile created by a User on the Platform, whether as a Business, an Expert/Creator, or both.
+- "Barter Deal" means a non-cash collaboration between a Business and an Expert/Creator in which products, services, access, content, or other agreed value are exchanged instead of money, subject to the applicable Platform Policies.
+- "Business" means any individual, customer, brand, business, startup, organisation, agency, company, or other person or entity using Fanitt to discover, find, engage, book, hire, collaborate with, or purchase from an Expert/Creator, whether for personal or professional requirements. The defined term "Business" is a platform-role label and may include an individual acting for a personal need and need not be a commercial enterprise.
+- "Celebrity" and "Influencer" mean individuals registered on the Platform as Experts/Creators to offer services such as brand promotions, endorsements, appearances, event participation, social media promotions, content, audience access, or other permitted offerings.
+- "Content" means any text, image, audio, video, profile information, review, message, digital file, live or recorded material, or other material uploaded, posted, streamed, sold, or transmitted on or through the Platform.
+- "Cooling Period" means any waiting, review, dispute, settlement, or processing period that may apply after completion of a Transaction and before an amount becomes eligible for settlement or withdrawal, as displayed on the Platform or prescribed by the applicable payment partner or Platform Policy from time to time.
+- "Secured Payment Flow" means the payment collection, processing, settlement, refund, hold, release, or payout process facilitated through one or more authorised third-party payment aggregators, payment gateways, banks, or other regulated payment partners engaged by Fanitt from time to time. Any escrow, nodal, settlement, or similar account used in such flow is maintained and operated by the relevant payment partner or banking institution in accordance with applicable law and its terms, and not by Fanitt as an independent payment aggregator unless Fanitt is separately authorised to do so under applicable law.
+- "Fanitt Coin" means an internal, non-cash platform usage credit, if and where made available by Fanitt, usable for Pitches or other designated Platform features on the terms, value, validity, and usage conditions displayed on the Platform from time to time. Fanitt Coins are not legal tender, a bank deposit, or an independent stored-value payment instrument.
+- "Fanitt House" means Fanitt's curated, invite-only premium community for selected Experts/Creators, as described in Pointer 10.
+- "Fanitt Store" means the digital monetisation infrastructure made available to eligible Experts/Creators to monetise skills, knowledge, content, time, digital products, communities, influence, and audience access through features made available by Fanitt from time to time, as described in Pointer 9.
+- "FanBox" means the voluntary tipping or support feature through which an Expert/Creator's audience may provide monetary support to that Expert/Creator, subject to applicable fees and payment terms displayed on the Platform.
+- "Invite-Only Community" means a private audience or member space controlled by an Expert/Creator through the Fanitt Store, which may be free, paid, subscription-based, invite-only, or subject to other access conditions offered by Fanitt.
+- "Marketplace" means Fanitt's discovery, opportunity, engagement, and transaction ecosystem through which Businesses may discover Experts/Creators, post Tasks or Requirements, receive or review Pitches, directly engage or book Experts/Creators where enabled, collaborate, transact, and complete engagements through Platform-supported flows.
+- "Marketplace Commission" means any platform commission, service fee, or transaction-linked charge payable to Fanitt by a Business and/or an Expert/Creator in connection with a Marketplace Transaction, at the rate displayed on the Platform and accepted by the relevant User before the applicable Transaction.
+- "Outlet" means restaurants, clubs, hotels, event venues, and other commercial establishments registered on the Platform as an Expert/Creator, Business, or both, as applicable.
+- "Pitch" means an application, offer, expression of interest, proposal, or response submitted by an Expert/Creator in relation to a Task, Requirement, opportunity, or other engagement flow made available on the Platform.
+- "Plan" means any free or paid subscription tier, package, membership, or access plan made available by Fanitt from time to time, which may determine allocations, usage credits, Marketplace Commission, access to Fanitt Store, FanBox, AI-assisted discovery or matchmaking, priority placement, support, or other features. Current Plan names, prices, benefits, limits, and charges are those displayed on the Platform at the time of purchase, renewal, or use.
+- "Priority Listing" means enhanced visibility or placement of a Task, Requirement, profile, Store, or collaboration opportunity made available under eligible Plans or promotional programmes.
+- "Expert/Creator" means any individual, professional, creator, influencer, celebrity, freelancer, expert, consultant, coach, designer, developer, educator, trainer, artist, performer, outlet, business, or other independent person or entity offering or monetising skills, knowledge, talent, content, time, influence, audience access, digital products, or services through Fanitt. Where the context requires, references in any Platform Policy to a provider or service provider shall be read as referring to an Expert/Creator.
+- "RM" means a Relationship Manager or other Fanitt representative who may provide assistance, coordination, or account support to eligible Users or Plans from time to time.
+- "Task" means a task, project, campaign, service requirement, personal requirement, collaboration opportunity, or other need posted by a Business for discovery of or response by Experts/Creators; where the context requires, "Requirement" shall have a corresponding meaning.
+- "Transaction" means any booking, engagement, purchase, subscription, contribution, paid access, sale, collaboration, or payment concluded through the Platform between a Business and an Expert/Creator, or between an Expert/Creator and its customers, members, followers, or audience through the Fanitt Store.
+- "User" means any individual or entity that registers on, browses, or otherwise uses the Platform in the capacity of a Business, an Expert/Creator, or both, and "you" shall be construed accordingly based on the capacity in which you use the Platform.
+
+2. Nature and Role of the Platform
+Fanitt is a discovery, opportunity, trust, engagement, transaction, and monetisation ecosystem. It presently operates through, among other features: (a) the Marketplace, through which Businesses and Experts/Creators may discover each other, post or discover Tasks and Requirements, submit or receive Pitches, directly discover or book each other where enabled, collaborate, and transact through the Secured Payment Flow; and (b) the Fanitt Store, a creator-commerce and monetisation infrastructure through which eligible Experts/Creators may independently monetise skills, knowledge, content, time, digital products, communities, influence, and audience access. Fanitt may introduce, modify, combine, discontinue, or expand Platform features and engagement formats from time to time, subject to applicable law and these Terms. Fees earned by Fanitt through different Platform services may be charged and accounted for separately as disclosed to Users.
+
+2.1 Intermediary Status
+In relation to Content, services, engagements, offerings, and transactions supplied by Users to one another, Fanitt/Rago Vradicals LLP acts as a technology intermediary and facilitation platform to the extent recognised under applicable Indian law, including the Information Technology Act, 2000 and rules made thereunder. Fanitt does not itself become the supplier, employer, principal, agent, manufacturer, performer, or professional service provider merely because it enables discovery, communication, booking, payment facilitation, Store functionality, ratings, verification, support, or other Platform tools. The underlying services, performances, campaigns, Tasks, digital products, sessions, content, or other offerings are supplied by the relevant Expert/Creator or other User, who remains responsible for their quality, legality, safety, timeliness, accuracy, and fulfilment. Nothing in this Pointer excludes or limits Fanitt's responsibility for obligations that applicable law expressly imposes on Fanitt in its own capacity as Platform operator.
+
+2.2 No Endorsement or Selection Role
+Fanitt does not select, recommend, or endorse any winning Pitch on a Task. The decision to accept, reject, or select any Pitch rests solely and exclusively with the Business who posted the Task. Fanitt may, at its discretion, display ratings, reviews, rankings, or recommendations (including through AI Matchmaking, where enabled) based on platform data and user feedback to assist discovery, but such display does not constitute a guarantee, endorsement, or warranty of any kind regarding any Expert/Creator or Business.
+
+2.3 No Employer-Employee or Agency Relationship
+Nothing in these Terms creates an employment, partnership, joint venture, franchise, or agency relationship between Fanitt and any Business or Expert/Creator, or between a Business and a Expert/Creator by virtue of Fanitt's facilitation. Each Expert/Creator acts as an independent contractor in relation to the Business they engage with, and in relation to its own audience through the Fanitt Store.
+
+3. Eligibility and Account Registration
+3.1 Eligibility
+The Platform is available only to individuals who are at least 18 (eighteen) years of age and who are competent to contract under the Indian Contract Act, 1872, and to entities validly incorporated/registered under applicable law and duly authorised to act on their own behalf. By using the Platform, you represent and warrant that you meet these eligibility requirements.
+
+3.2 Categories of Registration and Plans
+The Platform permits registration as a Business, an Expert/Creator, or both, including by individual Users/customers, Outlets, Influencers, Celebrities, Artists/Performers, professionals, experts, creators, and entities. A single individual or entity may hold or use more than one role, subject to applicable verification and Platform rules. Fanitt may make free or paid Plans available separately for different User roles. Plan names, availability, eligibility, prices, allocations, limits, features, and benefits may vary by User category, geography, promotional period, or other reasonable commercial criteria and shall be as displayed on the Platform at the relevant time.
+
+3.3 Verification / Know Your Customer (KYC)
+Fanitt may require verification of Businesses and Experts/Creators before permitting access to certain features, Pitches, bookings, Transactions, payouts, Plan upgrades, or monetisation tools. Depending on the User, Transaction, payment partner, and applicable law, verification may include government-issued identity information, tax identification details, banking or payout details, business information, or other information reasonably required for identity, fraud prevention, payment processing, regulatory compliance, or Platform trust and safety. Verification may be carried out by Fanitt and/or authorised verification, banking, or payment partners. You agree to provide accurate, current, and complete information and to promptly update such information if it changes. Fanitt may suspend or restrict any Account or feature pending, upon failure of, or where reasonably necessary to complete verification.
+
+3.4 Account Security
+You are responsible for maintaining the confidentiality of your Account credentials and for all activities that occur under your Account, including any Pitches, Task posts, Plan changes, or purchases made using your Fanitt Coins or payment instruments. You must notify Fanitt immediately of any unauthorised use of your Account or any other breach of security.
+
+4. Tasks, Pitching and Booking Process
+4.1 Posting a Task
+A Business may post a Task or Requirement describing the nature of the need, expected deliverables, budget or pricing preference, location, timeline, and other relevant details. A Business cannot post any Task or Requirement that is illegal, explicit, adult in nature, prohibited by the Platform Policies, or that demands any service prohibited under applicable law. Availability, duration, visibility, posting limits, charges, eligible Expert/Creator categories, and other conditions applicable to a Task or Requirement are governed by the Business's Plan and the conditions displayed on the Platform at the time of posting.
+
+4.2 Submission of Pitches
+Experts/Creators may submit Pitches in response to eligible open Tasks, Requirements, or opportunities, subject to the access conditions of their Account or Plan. Pitches may be price-based, negotiation-based, fixed-price, expression-of-interest based, or use such other engagement formats as Fanitt may make available from time to time. A Pitch may consume Fanitt Coins, credits, or attract a usage-based charge where disclosed before submission. An Expert/Creator may modify or withdraw a submitted Pitch before acceptance to the extent permitted by the relevant Platform flow. Except through features expressly enabled by Fanitt, Users must not use the Platform to send unsolicited commercial offers, spam, or attempts to bypass the applicable discovery or engagement mechanism.
+
+4.3 Selection of Expert/Creator
+The Business who posted the Task has sole discretion to review, negotiate with, and select the winning Pitch. Fanitt plays no role in selecting or recommending which Pitch is accepted, save for AI Matchmaking suggestions made available to certain Plans, which remain informational only.
+
+4.4 Negotiation and Communication
+Any negotiation between a Business and a Expert/Creator in relation to a Task must take place solely through Fanitt's internal messaging system. Direct communication between a Business and a Expert/Creator is not permitted, and contact details of either party are not made visible to the other, until the Expert/Creator has been formally hired through the Platform. Once hired, the parties may communicate through the Platform's in-app messaging system, subject to Fanitt's monitoring and applicable policies; calls, where enabled, may only be made through Fanitt's own in-platform calling system.
+
+4.5 Confirmation of Booking
+A booking is treated as confirmed only when the Business funds the applicable amount for hiring the selected Expert/Creator into Fanitt's Secured Payment Flow. Upon confirmation, Fanitt issues a booking confirmation to the Business and the Expert/Creator via email and WhatsApp, and issues an invoice reflecting applicable taxes.
+
+4.6 No Circumvention; Off-Platform Discovery Policy
+Businesses and Experts/Creators must not attempt to bypass the Platform to avoid applicable Platform fees, commissions, payment protections, or other agreed Platform mechanisms in relation to a connection, lead, Task, Requirement, booking, or opportunity first discovered or materially facilitated through Fanitt. Where parties nevertheless move an arrangement outside the Platform, that off-platform arrangement proceeds without Fanitt's Secured Payment Flow or Platform protections, and Fanitt shall have no responsibility for payment protection, dispute handling, refunds, fulfilment, or other aspects of that off-platform arrangement, except to the extent required by applicable law. Fanitt may take proportionate action against circumvention or attempted circumvention, including warning, feature restriction, suspension, termination, or recovery of fees or commissions that were contractually due, subject to applicable law and the relevant facts.
+
+4.7 Direct Discovery, Booking and Other Engagement Formats
+In addition to Task-and-Pitch workflows, Fanitt may enable Businesses to discover, contact, request, book, subscribe to, purchase from, or otherwise engage Experts/Creators directly through profiles, search, recommendations, AI-assisted discovery, Store pages, availability tools, calls, sessions, communities, live experiences, or other Platform features. The specific confirmation, payment, cancellation, communication, and fulfilment rules shown for the relevant feature at the time of use shall form part of the applicable Transaction.
+
+5. Contractual Relationship Between Parties
+Upon selection of a Expert/Creator for a Task, digital contracts are formed as follows: (a) the Business enters into an agreement with Fanitt to abide by these Terms and the applicable Platform Policies; (b) the Expert/Creator likewise enters into an agreement with Fanitt to abide by these Terms and the applicable Platform Policies; and (c) the Business and the Expert/Creator simultaneously enter into a direct contractual arrangement with each other in relation to the specific service, task, or engagement booked through the Platform. Where a Expert/Creator offers a product, session, or membership through the Fanitt Store, a corresponding direct contractual arrangement is formed between the Expert/Creator and the purchasing customer. Fanitt facilitates and records these arrangements but is not a party to, and assumes no liability arising from, the substantive service arrangement between the Business and the Expert/Creator, or between a Expert/Creator and its Fanitt Store customers.
+
+6. Subscriptions and Plans
+Fanitt may make free and paid Plans available to Businesses and Experts/Creators. Plans may determine, among other things, access to Tasks, Pitches, discovery tools, Fanitt Coins or other usage credits, applicable Marketplace Commission, Fanitt Store and FanBox access, AI-assisted tools, priority placement, verification or profile benefits, support, analytics, and other Platform features. Current Plan names, prices, billing cycles, eligibility, allocations, limits, commissions, and benefits are displayed on the Platform and may vary or be updated from time to time in accordance with Pointer 22.
+
+6.1 Free and Paid Plans
+Fanitt may offer one or more free Plans and one or more paid Plans. The features and limitations applicable to each Plan shall be those displayed on the Platform at the time the User selects, purchases, renews, or uses that Plan. Availability of any Plan or feature is not guaranteed permanently and may depend on User role, category, geography, eligibility, testing phase, or promotional programme.
+
+6.2 Billing and Renewal
+Paid Plans are billed in advance for the billing cycle selected or displayed at checkout. Where auto-renewal is offered and enabled with the User's authorisation, the Plan may renew for successive periods at the then-applicable price unless cancelled in accordance with the process displayed on the Platform and applicable law. Fanitt shall disclose the applicable price and material billing conditions before purchase or renewal as required by law.
+
+6.3 Changes, Downgrades and Feature Availability
+Fanitt may revise Plan structures, names, features, limits, prices, commissions, or eligibility from time to time. Changes affecting an existing paid billing period shall be handled in accordance with the applicable purchase terms, Platform Policies, and law. On expiry, cancellation, non-renewal, downgrade, suspension, or termination, Plan-specific features or unused periodic allocations may cease or expire, subject to settlement of pending Transactions and any rights required by law.
+
+6.4 Refundability
+Refunds, credits, and cancellations relating to Plans are governed by the Refund & Cancellation Policy and any mandatory rights available under applicable law. No statement in these Terms shall exclude a refund or remedy that cannot lawfully be excluded.
+
+7. Fanitt Coins and Usage-Based Fees
+Fanitt may issue Fanitt Coins or other internal usage credits for designated Platform features. The number of credits allocated, purchased, consumed, their monetary or usage equivalence (if any), validity, expiry, carry-forward, refundability, and permitted uses shall be displayed on the Platform or in the applicable Plan at the relevant time. Fanitt Coins and similar credits are Platform-use units only; they are not legal tender, deposits, investment products, or independently redeemable stored value unless Fanitt expressly states otherwise and is legally permitted to offer such functionality. Additional Pitches, Task posts, visibility, AI tools, or other usage-based features may attract fees or credit consumption as disclosed before the relevant action.
+
+8. Marketplace Fees, Escrow, Payment Flow and Invoicing
+Fanitt may earn revenue on Marketplace activity through Plan subscription fees, Marketplace Commission, usage-based fees, featured or priority services, and such other Platform charges as may be introduced from time to time. Payments and settlements are facilitated through the Secured Payment Flow and authorised third-party payment partners as described below.
+
+8.1 Platform Fees
+Applicable subscription fees, commissions, service charges, usage-based fees, payment charges, taxes, and other amounts payable to Fanitt are displayed on the Platform before the relevant purchase, booking, renewal, or Transaction is confirmed. Rates may differ by Plan, User category, Transaction type, geography, promotional programme, or other disclosed commercial criteria and may be updated from time to time in accordance with Pointer 22 and applicable law. The rate accepted by the User for a confirmed Transaction shall apply to that Transaction unless adjustment is required by law, refund, cancellation, dispute resolution, or an expressly accepted modification.
+
+8.2 Barter Deals
+Where a Business and a Expert/Creator agree to a Barter Deal instead of a cash Transaction, Fanitt does not charge any Marketplace Commission on that arrangement. Parties entering into a Barter Deal must provide a mutual rating of each other on completion, and remain subject to these Terms, including Pointer 4 and Pointer 13, in all other respects.
+
+8.3 Secured Payment Flow
+Amounts payable in connection with a Transaction may be collected and processed through one or more authorised third-party payment aggregators, payment gateways, banks, acquiring institutions, cross-border payment providers, or other regulated payment partners selected by Fanitt from time to time. Such partners may maintain escrow, nodal, settlement, or similar accounts and may apply settlement, reserve, risk, refund, chargeback, verification, or processing requirements under applicable law and their terms.
+
+Where the Platform displays an amount as credited to an Expert/Creator's "wallet" or earnings balance, such display ordinarily represents a Platform ledger or settlement status and does not by itself constitute a bank account, deposit, or independently transferable stored-value facility. Settlement or withdrawal becomes available only after completion of the applicable Transaction conditions and any Cooling Period, dispute, refund, chargeback, fraud review, payment-partner hold, or statutory requirement.
+
+Fanitt facilitates the payment workflow but does not hold or operate customer funds as an independent payment aggregator or escrow provider unless and to the extent Fanitt is separately authorised to do so under applicable law. The specific settlement sequence and timing may vary by Transaction type, payment method, geography, payment partner, and applicable law.
+
+8.4 Payment Methods
+Payments may be made through such domestic or international payment methods as are made available on the Platform from time to time, including UPI, cards, net banking, wallets, bank transfers, or other supported instruments. Payments are processed through authorised third-party payment and banking partners. By initiating a payment, you authorise Fanitt and the relevant payment partners to process the Transaction in accordance with these Terms, the payment partner's applicable terms, and applicable law. Availability of a particular payment method, currency, geography, or partner may change without affecting the validity of these Terms.
+
+8.5 Invoicing and Taxes
+Fanitt issues an invoice for each confirmed booking and each Fanitt Store/FanBox Transaction, inclusive of applicable taxes such as GST, in accordance with applicable law. Businesses and Experts/Creators are independently responsible for their own tax obligations, including deduction, collection, deposit, and filing requirements applicable to amounts earned or paid through the Platform, save to the extent Fanitt is itself statutorily required to withhold or collect tax at source.
+
+8.6 Refunds and Cancellations
+Cancellations, refunds, and related timelines in respect of Task bookings, Fanitt Store purchases, and Plan subscriptions are governed by Fanitt's separate Refund & Cancellation Policy, which forms part of these Terms by reference, read together with Pointer 6.4 in respect of subscriptions.
+
+9. Fanitt Store and Creator Commerce
+The Fanitt Store is Fanitt's digital monetisation infrastructure through which eligible Experts/Creators may monetise skills, knowledge, content, time, digital products, communities, influence, and audience access directly to their customers, members, followers, or audience, independently of or alongside Marketplace engagements. Access may depend on the User's Plan, eligibility, verification, geography, feature availability, or other conditions displayed on the Platform. Fanitt may expand, modify, test, combine, or discontinue Store features from time to time.
+
+9.1 Fanitt Store Features
+Subject to the Expert/Creator's Plan, eligibility, Platform Policies, and feature availability, the Fanitt Store may include, without limitation: Virtual Meet for webinars, virtual classes, meetings, consultations, and one-to-one sessions; live chat and audio/video calling, including free or paid and, where enabled, pay-per-minute formats; Stream Live for public, private, invite-only, subscriber-only, ticketed, or paid live streaming; scheduling, invitations, RSVP or ticketing tools; digital product storefronts for courses, ebooks, templates, digital files, audio, video, and other permitted digital products; Affiliate Store or affiliate-link tools; FanBox; free, paid, subscription-based, or invite-only communities and channels; access-control and moderation tools; and Store wallet/earnings, transaction, audience, and analytics dashboards. Fanitt may introduce additional monetisation, community, communication, commerce, or audience-management tools from time to time, and the feature-specific terms displayed at the time of use shall apply.
+
+9.2 Fanitt Store Commission
+Fanitt may charge commissions, service fees, payment charges, or other disclosed charges on Fanitt Store Transactions, including FanBox and other monetisation features. The applicable rate or amount shall be displayed on the Platform before the relevant Transaction, purchase, subscription, or contribution is confirmed. Store fees are separate from Marketplace Commission unless Fanitt expressly states otherwise for a particular product or programme. Rates may be updated from time to time in accordance with Pointer 22 and applicable law.
+
+9.3 Expert/Creator Responsibility for Store Offerings
+As between Fanitt and a Expert/Creator's Fanitt Store customers, the Expert/Creator remains solely responsible for the description, quality, delivery, legality, and fulfilment of any product, session, content, or membership sold through the Fanitt Store, on the same basis as set out in Pointer 2 in respect of Marketplace services.
+
+10. Fanitt House Club
+Fanitt House is a curated, invite-only premium community for selected Experts/Creators. There is no minimum follower-count requirement or follower-based eligibility threshold for joining Fanitt generally or for being considered for Fanitt House. Fanitt may consider quality, credibility, expertise, creativity, trust, platform conduct, audience or community value, professional record, transaction history, category relevance, or other criteria published or applied by Fanitt from time to time. Membership is limited, curated, invite-only, and not guaranteed or publicly purchasable. Fanitt retains discretion, exercised subject to applicable law and its Platform Policies, to invite, admit, decline, suspend, or remove an Expert/Creator from Fanitt House.
+
+Fanitt House benefits, if offered, may include profile status, complimentary or preferential Platform access, usage credits, suggested-feed visibility, exclusive opportunities, events, collaborations, or other benefits determined by Fanitt from time to time. No particular benefit is guaranteed permanently unless expressly stated for a defined period.
+
+11. Ratings, Reviews and Recommendations
+Fanitt may provide ratings, reviews, rankings, or recommendations of Businesses and Experts/Creators based on completed Transactions (including Barter Deals, for which a mutual rating is mandatory) and platform activity, to assist other Users in making informed decisions. Ratings and reviews must be genuine, based on an actual Transaction, and must not contain defamatory, abusive, false, or unlawful content. Fanitt reserves the right to moderate, remove, or decline to publish any rating or review that violates these Terms or applicable law, but does not independently verify the accuracy of every review and is not liable for the content of user-submitted reviews.
+
+12. User Obligations and Prohibited Conduct
+By using the Platform, you agree that you shall not, and shall not permit any third party to:
+1. Post, upload, transmit, or request any content, service, Task, or Fanitt Store offering that is illegal, explicit, sexually suggestive or adult in nature, obscene, defamatory, discriminatory, or otherwise contrary to applicable law;
+2. Demand, offer, or facilitate any service that is prohibited under the laws of India;
+3. Impersonate any person or entity, or misrepresent your identity, age, affiliation, follower count, or credentials, including for the purpose of Fanitt House eligibility;
+4. Circumvent the Platform's Pitching, communication, escrow, or payment mechanisms, or induce another party to transact outside the Platform in relation to a connection made through Fanitt, in each case as further described in Pointer 4.6;
+5. Upload any content that infringes the intellectual property, privacy, or other rights of any third party;
+6. Transmit any virus, malware, or engage in any activity that interferes with or disrupts the Platform's functioning or security;
+7. Use the Platform, Fanitt Coins, or any Plan for any fraudulent, unlawful, or unauthorised purpose, including money laundering, artificially inflating followers or ratings, or circumvention of KYC requirements;
+8. Harass, threaten, stalk, or abuse any other User, or Fanitt personnel.
+
+Violation of this Pointer may result in content removal, warning, suspension, or permanent termination of your Account (including forfeiture of unused Fanitt Coins and Plan benefits, as described in Pointer 18), in addition to any other remedies available to Fanitt in law or equity, and may be reported to law enforcement authorities where appropriate. Further conduct standards applicable to specific categories of Users are set out in Fanitt's Acceptable Use / Community Guidelines and any category-specific Platform Participant Agreement.
+
+13. Intellectual Property
+13.1 Platform IP
+The Platform, including its name "Fanitt," logo, design, software, look and feel, and all associated intellectual property, is owned by Rago Vradicals LLP or its licensors and is protected under applicable intellectual property laws. Nothing in these Terms transfers any ownership rights in the Platform to you.
+
+13.2 User Content
+You retain ownership of Content you upload to the Platform, including Content offered for sale through the Fanitt Store. By uploading Content, you grant Fanitt a non-exclusive, worldwide, royalty-free, sub-licensable licence to host, store, reproduce, display, and distribute such Content solely for the purposes of operating, promoting, and providing the Platform's services (including the Marketplace and the Fanitt Store). You represent that you have all necessary rights to grant this licence and that your Content does not infringe any third-party rights. Further terms relating to content ownership and licensing are set out in Fanitt's Content & Intellectual Property Policy.
+
+14. Data Protection, Privacy and Communication
+Fanitt collects and processes personal data in accordance with its Privacy Policy and applicable data protection law. Depending on the User and feature, this may include identity/KYC information, tax or business information, banking or payout details, contact information, transaction information, device and usage information, Content, and other data reasonably required to operate, secure, personalise, and improve the Platform or comply with law. Fanitt may share or make data available to authorised payment, banking, verification, cloud, communications, analytics, professional, fraud-prevention, compliance, or other service providers where reasonably necessary for those purposes, subject to applicable contractual and legal safeguards, or where required by law. The Privacy Policy governs the purposes, lawful basis or consent mechanisms where applicable, retention, rights, grievance channels, and other data-processing details.
+
+Contact details of Businesses and Experts/Creators may be withheld, masked, or disclosed only in accordance with the relevant Platform feature and Policies. Communication may take place through Fanitt's in-app messaging, calling, live, community, email, WhatsApp, notification, or other supported communication tools. Fanitt may use third-party communications infrastructure to provide such functionality, subject to applicable law and the Privacy Policy.
+
+15. Disclaimers and Limitation of Liability
+15.1 Platform Provided "As Is"
+The Platform and all facilitation services (including the Marketplace and the Fanitt Store) are provided on an "as is" and "as available" basis, without warranties of any kind, whether express or implied, including warranties of merchantability, fitness for a particular purpose, non-infringement, or uninterrupted or error-free operation, to the maximum extent permitted by applicable law.
+
+15.2 No Liability for Third-Party Services
+As Fanitt acts solely as an intermediary connecting Businesses and Experts/Creators (and, through the Fanitt Store, connecting Experts/Creators with their audience), Fanitt is not responsible for, and disclaims all liability in relation to, the quality, safety, legality, timeliness, or outcome of any service, performance, campaign, task, product, or Fanitt Store offering provided by a Expert/Creator, or for any dispute, loss, injury, or damage arising from or in connection with such services, save in relation to Fanitt's own facilitation, payment facilitation, and platform-related obligations.
+
+15.3 Limitation of Liability
+To the maximum extent permitted by applicable law, Fanitt's aggregate liability to any Business, Expert/Creator, or Fanitt Store customer arising out of or in connection with these Terms or use of the Platform shall not exceed the platform fees, Marketplace Commission, subscription fees, or Fanitt Store/FanBox commission actually received by Fanitt in respect of the specific Transaction giving rise to the claim. In no event shall Fanitt be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of profit, revenue, data, Fanitt Coins, or goodwill.
+
+16. Indemnification
+You agree to indemnify, defend, and hold harmless Rago Vradicals LLP, its Fanitt brand, and their respective directors, partners, employees, and agents from and against any claims, liabilities, damages, losses, and expenses, including reasonable legal fees, arising out of or in any way connected with: (a) your access to or use of the Platform (including the Marketplace and the Fanitt Store); (b) your breach of these Terms or any Platform Policy; (c) your violation of any applicable law or third-party right; or (d) any service, Content, Fanitt Store offering, or communication provided or made by you through the Platform.
+
+17. Dispute Resolution Between Businesses and Experts/Creators
+Fanitt is responsible for addressing disputes that relate to the operation of the Platform itself, including Platform functionality, Plan billing, Fanitt fees, booking records, and Fanitt's own facilitation obligations. Payment, refund, settlement, chargeback, or payout matters may also be subject to the processes and timelines of the applicable payment partner. Disputes concerning the actual performance, quality, legality, suitability, delivery, or outcome of an underlying service or Store offering are principally between the relevant Business and Expert/Creator (or Expert/Creator and Store customer), because Fanitt is not the supplier of that underlying offering. Fanitt may provide Platform-based dispute tools, review transaction evidence, temporarily pause settlement where supported and legally permissible, or assist in good faith to facilitate resolution, but does not guarantee any particular outcome except where Fanitt has expressly undertaken a specific obligation or applicable law requires otherwise. Off-platform arrangements described in Pointer 4.6 fall outside Fanitt's payment protection and dispute mechanisms to the maximum extent permitted by law.
+
+18. Suspension and Termination
+Fanitt may, at its sole discretion and without prior notice, suspend, restrict, or terminate your Account or access to the Platform if you breach these Terms or any Platform Policy, provide false or misleading information, fail KYC verification, fail to pay a Plan renewal fee, engage in prohibited conduct under Pointer 12, or attempt to circumvent the Platform under Pointer 4.6. You may deactivate your Account at any time by following the process specified on the Platform, subject to settlement of any pending Transactions, fees, or obligations. On suspension, termination, or deactivation, any unused Fanitt Coins, Plan-specific benefits, and access to Fanitt Store, FanBox, or Fanitt House will lapse, without prejudice to your obligation to settle amounts already due to Fanitt or to a counterparty Business/Expert/Creator, and without prejudice to your right to withdraw amounts already credited to your wallet and past the applicable Cooling Period.
+
+19. Grievance Redressal
+In accordance with the Information Technology Act, 2000 and the rules made thereunder, Fanitt has appointed a Grievance Officer to address complaints regarding the Platform. Users may address grievances to:
+
+Grievance Officer: Prabhansh Pandey
+Rago Vradicals LLP (operating "Fanitt")
+House No. 40 & 41, Siddhi Vinayak Colony, Sukhi Sevaniya, Bhopal, Madhya Pradesh 462010, India
+Email: support@fanitt.com
+
+Fanitt will acknowledge and address grievances within the timelines prescribed under applicable law.
+
+20. Governing Law and Dispute Resolution
+These Terms and any dispute arising out of or in connection with them, including their existence, validity, interpretation, performance, or termination, shall be governed by and construed in accordance with the laws of India.
+
+The parties shall first attempt in good faith to resolve any dispute amicably through written notice and discussions for a period of thirty (30) days from receipt of the dispute notice, unless urgent interim relief is reasonably required. If the dispute remains unresolved and is legally capable of being referred to arbitration, it shall be finally resolved by arbitration in accordance with the Arbitration and Conciliation Act, 1996, as amended from time to time. The arbitration shall be conducted by a sole arbitrator mutually appointed by the disputing parties. If the parties do not mutually agree upon the arbitrator within thirty (30) days after a valid request for arbitration, the arbitrator shall be appointed in accordance with the procedure available under the Arbitration and Conciliation Act, 1996, by the competent court or institution, as applicable. No party shall have an exclusive unilateral right to appoint the sole arbitrator where such appointment would be contrary to applicable law.
+
+The seat and legal place of arbitration shall be Bhopal, Madhya Pradesh, India, unless the parties mutually agree otherwise in writing. Hearings may be conducted physically, virtually, or in hybrid form as determined by the arbitrator after considering the circumstances and applicable law. The language of arbitration shall be English. The arbitrator may grant interim, conservatory, injunctive, monetary, declaratory, or other relief available under applicable law. Nothing in this Pointer prevents either party from approaching a court of competent jurisdiction for urgent interim or protective relief, enforcement of an arbitral award, or any matter that is not legally capable of arbitration. Subject to the foregoing and applicable law, courts at Bhopal, Madhya Pradesh shall have jurisdiction.
+
+21. Third-Party Vendors and Operational Service Partners to Fanitt
+In operating the Platform, including the Marketplace and the Fanitt Store, Fanitt may engage employees, freelancers, developers, marketing and influencer agencies, event managers, payment providers, technology vendors, and cloud/service providers. Engagement of such third parties does not alter Fanitt's role as an intermediary vis-à-vis Businesses and Experts/Creators on the Platform, and such third parties act on Fanitt's behalf solely for the operational purposes for which they are engaged, subject to appropriate confidentiality and data protection obligations.
+
+22. Amendments to these Terms
+Fanitt may revise these Terms and its Platform Policies from time to time to reflect changes in the Platform, Plans, features, commercial model, payment arrangements, fees, commission structures, services, security requirements, or applicable law. Updated Terms will be posted on the Platform with a revised "Last Updated" date. Where required by applicable law, or where a change materially affects existing Users' rights or ongoing paid commitments, Fanitt will provide additional notice before the change takes effect.
+
+Current prices, subscription charges, commissions, usage fees, allocations, and feature-specific charges may be displayed dynamically on the Platform and need not be reproduced as fixed figures in these Terms. A change to a displayed commercial rate shall apply prospectively in accordance with the disclosure presented to the User and shall not retrospectively alter a completed Transaction except where required by law, refund, chargeback, dispute resolution, correction of an obvious error, or an expressly accepted modification. Continued use of the Platform after revised Terms take effect constitutes acceptance to the extent permitted by applicable law.
+
+23. Relationship with Other Platform Policies
+These Terms should be read together with Fanitt's then-current fee and Plan disclosures displayed on the Platform, Privacy Policy, Cookie Policy, Refund & Cancellation Policy, Acceptable Use / Community Guidelines, Content & Intellectual Property Policy, and any applicable category-specific agreement (including the Business/Customer Agreement, Expert/Creator Agreement, Artist/Performer Agreement, Influencer/Celebrity Agreement, and Outlet Agreement), each of which is incorporated by reference where applicable. In the event of a conflict, a category-specific agreement or feature-specific terms shall prevail only for the specific subject matter and User category or feature they expressly govern, while these Terms continue to govern generally.
+
+24. General Provisions
+24.1 Entire Agreement
+These Terms, together with the Platform Policies and commercial disclosures referenced herein, constitute the entire agreement between you and Fanitt/Rago Vradicals LLP regarding your use of the Platform and supersede all prior agreements and understandings on the subject matter.
+
+24.2 Severability
+If any provision of these Terms is held to be invalid or unenforceable, that provision shall be enforced to the maximum extent permissible, and the remaining provisions shall continue in full force and effect.
+
+24.3 Waiver
+No failure or delay by Fanitt in exercising any right under these Terms shall operate as a waiver of that right.
+
+24.4 Assignment
+You may not assign or transfer your rights or obligations under these Terms without Fanitt's prior written consent. Fanitt may assign these Terms in connection with a merger, acquisition, or sale of assets, or by operation of law.
+
+24.5 Force Majeure
+Fanitt shall not be liable for any failure or delay in performance resulting from causes beyond its reasonable control, including natural disasters, pandemics, government action, internet or telecommunications failures, or other events of force majeure.
+
+24.6 Notices
+Fanitt may provide notices to you via the Platform, email, or WhatsApp, using the contact details provided in your Account. You may send notices to Fanitt at the contact details provided in Pointer 25.
+
+25. Contact Us
+For any questions regarding these Terms, please contact:
+Rago Vradicals LLP (operating the "Fanitt" platform)
+House No. 40 & 41, Siddhi Vinayak Colony, Sukhi Sevaniya, Bhopal, Madhya Pradesh 462010, India
+LLPIN: ADA-8359 | PAN: ABOFR3622G
+Email: ragovradicals@gmail.com
+
+ANNEXURE A — FEE, PLAN AND COMMISSION FRAMEWORK
+This Annexure forms part of the Terms and explains how Fanitt communicates fees, Plans, commissions, and usage-based charges without fixing commercial rates that may change over time.
+
+A.1 Current Commercial Terms
+Current Plan names, subscription prices, billing cycles, Marketplace Commission rates, Fanitt Store and FanBox charges, Fanitt Coin or usage-credit economics, additional Pitch or Task-post charges, payment-related charges, taxes, promotional rates, and feature entitlements shall be those displayed on the Platform before the relevant purchase, renewal, booking, Transaction, or charge is confirmed.
+
+A.2 User Acceptance and Transaction-Level Certainty
+Before a paid Plan, booking, Store purchase, paid feature, or other chargeable action is confirmed, Fanitt will display or otherwise make available the material price, fee, commission, or charge applicable to that action as required by applicable law. The commercial terms accepted for a confirmed Transaction apply to that Transaction, subject to refunds, cancellations, disputes, chargebacks, taxes, payment-partner adjustments, or other changes permitted by these Terms, the Platform Policies, or law.
+
+A.3 Changes to Rates and Plans
+Fanitt may introduce, withdraw, rename, restructure, discount, bundle, or otherwise modify Plans, subscription amounts, commissions, usage fees, credits, allocations, eligibility, and feature entitlements from time to time based on market conditions, geography, category, promotions, product development, or other reasonable commercial considerations. Such changes will apply prospectively and with any notice required under Pointer 22 and applicable law.
+
+A.4 Separate Revenue Streams
+Unless expressly stated otherwise on the Platform, Marketplace fees and commissions, Fanitt Store/FanBox fees, Plan subscription charges, payment-partner charges, taxes, and other usage-based charges are separate and may apply independently to the same User during the same period.
+
+A.5 Payment and Settlement Flow
+1. The Business or customer initiates payment through a payment method made available on Fanitt.
+2. The payment is processed by an authorised third-party payment aggregator, gateway, bank, or other payment partner.
+3. The applicable Task, booking, Store purchase, session, subscription, contribution, or other Transaction is performed or processed.
+4. Fanitt records the Transaction and applicable fees/commissions in the relevant Platform ledger or earnings dashboard.
+5. Any applicable Cooling Period, refund window, dispute, chargeback, fraud/risk review, statutory hold, or payment-partner settlement requirement is applied.
+6. Eligible amounts are settled or made available for payout in accordance with the applicable payment partner, Platform flow, and law.
+
+A.6 Taxes and Third-Party Charges
+Applicable taxes, payment gateway or payment-partner charges, currency conversion or cross-border charges, withholding, and other statutory or third-party amounts may apply in addition to Fanitt's own fees and will be disclosed or accounted for as required by applicable law and the relevant payment flow.

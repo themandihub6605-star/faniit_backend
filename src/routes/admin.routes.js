@@ -5,6 +5,7 @@ const admin = require('../controllers/admin.controller');
 const adminPosts = require('../controllers/adminPost.controller');
 const broadcasts = require('../controllers/broadcast.controller');
 const adminCampaigns = require('../controllers/adminCampaign.controller');
+const homeLayout = require('../controllers/homeLayout.controller');
 const { uploadImage } = require('../middlewares/upload.middleware');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
@@ -14,6 +15,11 @@ const { ROLES } = require('../constants/enums');
 router.use(protect, authorize(ROLES.ADMIN));
 
 // Users
+// App home screen sections (order, titles, pinned items)
+router.get('/home-layout', homeLayout.getAdminLayout);
+router.put('/home-layout', homeLayout.saveLayout);
+router.get('/home-layout/search', homeLayout.searchItems);
+
 router.get('/users', admin.listUsers);
 router.get('/users/:id', admin.getUserDetail);
 router.patch('/users/:id/suspend', admin.suspendUser);

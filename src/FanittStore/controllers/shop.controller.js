@@ -3,6 +3,7 @@ const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
 const ApiError = require('../../utils/apiError');
 const { Store, DigitalProduct, StoreOrder, LiveStream } = require('../models');
+const { pinnedIds } = require('../../utils/pinnedIds');
 const { STORE_STATUS, PRODUCT_STATUS, ORDER_STATUS, ORDER_ITEM, LIVE_STATUS, LIVE_VISIBILITY, PRODUCT_CATEGORIES } = require('../constants');
 const settingsService = require('../services/settings.service');
 const orderService = require('../services/order.service');
@@ -34,6 +35,8 @@ const getConfig = catchAsync(async (req, res) => {
 const listStores = catchAsync(async (req, res) => {
   const { page, limit, skip } = pageParams(req.query);
   const filter = { status: STORE_STATUS.ACTIVE, isOpen: true };
+  const ids = pinnedIds(req.query);
+  if (ids) filter._id = { $in: ids };
   const search = String(req.query.search || '').trim();
   if (search) filter.name = new RegExp(escapeRegex(search), 'i');
   const [stores, total] = await Promise.all([
@@ -60,6 +63,8 @@ const listProducts = catchAsync(async (req, res) => {
   const storeMap = new Map(stores.map((s) => [String(s._id), s]));
 
   const filter = { status: PRODUCT_STATUS.PUBLISHED, store: { $in: stores.map((s) => s._id) } };
+  const ids = pinnedIds(req.query);
+  if (ids) filter._id = { $in: ids };
   const search = String(req.query.search || '').trim();
   if (search) {
     const pattern = new RegExp(escapeRegex(search), 'i');

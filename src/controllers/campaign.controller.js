@@ -5,6 +5,7 @@ const notificationService = require('../services/notification.service');
 const subscriptionService = require('../services/subscription.service');
 const milestoneService = require('../services/milestone.service');
 const catchAsync = require('../utils/catchAsync');
+const { pinnedIds } = require('../utils/pinnedIds');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const {
@@ -47,6 +48,8 @@ const listCampaigns = catchAsync(async (req, res) => {
   const { category, status = CAMPAIGN_STATUS.OPEN, page = 1, limit = 20 } = req.query;
 
   const filter = { ...PUBLICLY_APPROVED };
+  const ids = pinnedIds(req.query);
+  if (ids) filter._id = { $in: ids };
   if (category) filter.category = category;
   // Drafts are private to their brand — never list them publicly.
   filter.status = status && status !== CAMPAIGN_STATUS.DRAFT ? status : CAMPAIGN_STATUS.OPEN;

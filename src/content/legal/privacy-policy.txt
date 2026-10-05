@@ -1,0 +1,177 @@
+PRIVACY POLICY
+(In accordance with applicable data protection and privacy laws, including the Digital Personal Data Protection Act, 2023 and rules made thereunder, as and when applicable and in force)
+Last Updated: 02 October 2026
+
+1. Introduction
+Fanitt (hereinafter referred to as the "Platform", "we", "us" or "our") is owned and operated by Rago Vradicals LLP, a Limited Liability Partnership incorporated under the Limited Liability Partnership Act, 2008, having its registered office at House No. 40 & 41, Siddhi Vinayak Colony, Sukhi Sevaniya, Bhopal, Madhya Pradesh 462010, India.
+
+Fanitt is a technology-enabled discovery, opportunity, transaction and monetisation ecosystem through which individuals, businesses and organisations may discover, connect, collaborate and transact with persons or entities offering skills, knowledge, talent, content, time, influence, expertise or other lawful services or offerings. For purposes of this Policy, a person or entity seeking, discovering, engaging or purchasing such offerings is referred to as a "Business", and a person or entity offering or monetising such abilities or offerings is referred to as an "Expert/Creator". A Business may include an individual acting for a personal or non-commercial requirement and need not be a commercial enterprise. A User may use the Platform as a Business, an Expert/Creator, or both.
+
+The Platform may include, among other things, discovery and matching features, opportunity or requirement posting, pitching and engagement tools, communications, transactions and payment facilitation, ratings and reviews, and the Fanitt Store and related creator-commerce or monetisation features, including digital products, consultations, virtual meetings, live streams, subscriptions, communities, FanBox, affiliate functionality and such additional features as Fanitt may lawfully introduce from time to time.
+
+This Privacy Policy ("Policy") describes how we, as a Data Fiduciary, collect, use, store, share, disclose, protect and erase personal data in accordance with applicable Indian law, including the Digital Personal Data Protection Act, 2023 ("DPDP Act") and rules made thereunder, as and when applicable and in force. This Policy applies to personal data processed by us in digital form, including personal data collected in non-digital form and subsequently digitised.
+
+By accessing or using the Platform, creating an Account, or otherwise providing personal data to us, you acknowledge that you have read and understood this Policy. Where consent is required by applicable law, such consent will be sought separately in the manner required by law.
+
+2. Key Definitions
+For purposes of this Policy, the following terms shall have the meanings set out below:
+- "Data Fiduciary" means the person who, alone or in conjunction with other persons, determines the purpose and means of processing personal data. Rago Vradicals LLP is the Data Fiduciary in relation to personal data for which it determines such purpose and means.
+- "Data Principal" means the individual to whom the personal data relates. Where an individual uses the Platform as a Business, an Expert/Creator, or both, that individual is a Data Principal in relation to their personal data.
+- "Data Processor" means any person who processes personal data on behalf of the Data Fiduciary, including, where applicable, cloud, hosting, payment, verification, analytics, communications, security, customer-support or technology service providers.
+- "Consent Manager" means a person registered with the Data Protection Board of India to enable a Data Principal to give, manage, review or withdraw consent in accordance with applicable law.
+- "Personal Data" means any data about an individual who is identifiable by or in relation to such data.
+- "Personal Data Breach" means any unauthorised processing of personal data, or accidental disclosure, acquisition, sharing, use, alteration, destruction or loss of access to personal data, that compromises its confidentiality, integrity or availability.
+- "Processing" in relation to personal data means a wholly or partly automated operation or set of operations performed on digital personal data, including collection, recording, organisation, structuring, storage, adaptation, retrieval, use, alignment, combination, indexing, sharing, disclosure, erasure or destruction.
+- "Board" means the Data Protection Board of India established under applicable law.
+
+3. The Data Fiduciary
+For personal data in respect of which Rago Vradicals LLP determines the purpose and means of processing through the Platform, Rago Vradicals LLP acts as the Data Fiduciary and is responsible for complying with its obligations under applicable data protection law, including providing required notices, implementing reasonable security safeguards, facilitating applicable Data Principal rights, and addressing Personal Data Breaches as required by law.
+
+Where we engage a Data Processor to process personal data on our behalf and on our instructions, we remain responsible for our obligations as Data Fiduciary to the extent required by applicable law.
+
+4. The Data Principal
+Every individual who registers on, accesses, or otherwise provides personal data to the Platform, whether as a Business, an Expert/Creator, or both, is a Data Principal in relation to that personal data. Data Principals are responsible for ensuring that personal data supplied by them is accurate, complete and kept reasonably up to date.
+
+Where a Data Principal provides personal data relating to another individual, including where a booking, engagement, purchase or interaction is undertaken on another person's behalf, the Data Principal represents that they are authorised to provide such information and have obtained any consent or other lawful basis required for doing so.
+
+5. Personal Data We Collect
+We seek to collect personal data that is reasonably necessary for the specified purposes communicated to you. The categories collected depend on the capacity in which you use Fanitt, the features you access, and the information you choose or are required to provide.
+
+5.1 Identity and Contact Data
+- Full name, gender, date of birth or age, where required or voluntarily provided;
+- Mobile number, email address and communication preferences;
+- Residential, billing, service or business address, city, pin code and service area, where applicable;
+- Profile photograph and other profile information voluntarily provided by you.
+
+5.2 Verification, Professional and Credential Data
+- Government-issued identity or tax information, such as Aadhaar, PAN, driving licence or other permitted documents, where verification is required and subject to applicable law;
+- Skills, categories, qualifications, certificates, work experience, portfolio, professional information, creator information, social/profile links, audience or follower information voluntarily supplied by an Expert/Creator;
+- Business, organisation, GSTIN or other professional details, where applicable;
+- Bank account, UPI or payout-related information necessary to enable settlements or payouts through authorised payment service providers.
+
+5.3 Transaction, Platform and Monetisation Data
+- Requirements, opportunities, pitches, engagements, bookings, purchases, quotations or negotiated terms, ratings, reviews and Platform messages;
+- Fanitt Store activity, including digital products, consultations, meetings, webinars, live streams, subscriptions, communities, FanBox, affiliate activity and related transaction records, where such features are used;
+- Payment and billing information necessary to facilitate transactions. Payments may be processed by authorised third-party payment gateways, payment aggregators, banking partners or other payment service providers, and Fanitt does not represent that it directly operates the underlying regulated payment infrastructure;
+- Customer-support, grievance, moderation, fraud-prevention, trust-and-safety and dispute-related information.
+
+5.4 Device, Usage and Location Data
+- Device information, IP address, browser or app information, log data, cookies, SDK information and Platform usage analytics;
+- Search, discovery, interaction and engagement signals used to operate, secure, improve or personalise the Platform;
+- Location or service-area information entered by you manually; approximate or device-derived location where enabled; and precise location only where a particular feature reasonably requires it and you grant the applicable device or Platform permission.
+
+5.5 Content and Communications
+- Content, files, images, audio, video, digital products, portfolio materials or other information you upload, publish, transmit or make available through the Platform;
+- Communications conducted using Fanitt's messaging, calling, virtual meeting, live-streaming, community or similar features, to the extent technically processed or retained by the Platform or its service providers for the relevant feature, safety, support or legal purpose.
+
+Fanitt does not necessarily collect every category listed above from every User. The information processed depends on the relevant feature and the specified purpose communicated at or before collection.
+
+6. Purpose of Collection and Processing
+We process personal data for specified purposes for which consent has been obtained where required, or where processing is otherwise permitted under applicable law. Depending on the features you use, such purposes may include:
+1. Creating, maintaining, securing and managing your Platform Account and profile;
+2. Verifying identity, credentials or eligibility where verification is required;
+3. Enabling discovery and matching between Businesses and Experts/Creators based on requirements, skills, categories, location, availability, preferences and other relevant Platform signals;
+4. Enabling opportunity or requirement posting, pitches, negotiation, communication, booking, engagement and completion workflows;
+5. Facilitating payments, payouts, billing, refunds, commissions, subscriptions and transaction records through authorised third-party payment and banking service providers;
+6. Operating Fanitt Store and related monetisation features, including digital products, consultations, virtual meetings, webinars, live streams, paid or private communities, subscriptions, FanBox, affiliate functionality and other lawful monetisation formats made available by Fanitt;
+7. Enabling ratings, reviews, trust signals, moderation, customer support, grievance handling and dispute resolution;
+8. Providing discovery, recommendations, personalisation, AI-assisted matching or similar functionality. Such tools may use relevant profile, preference, category, location and Platform-activity signals to assist discovery; final decisions to engage or transact remain with Users;
+9. Sending service communications, security alerts, booking and transaction notifications, and promotional or marketing communications where permitted and, where required, consented to;
+10. Detecting, preventing and investigating fraud, abuse, circumvention, security incidents, prohibited conduct or other misuse of the Platform;
+11. Maintaining, analysing, testing, developing and improving the Platform, including through aggregated or anonymised analytics where appropriate;
+12. Complying with applicable law, court orders, regulatory requirements, tax or accounting obligations and valid requests from governmental or law-enforcement authorities;
+13. Establishing, exercising or defending legal claims and enforcing the Platform's Terms and policies, to the extent permitted by law.
+
+7. Consent
+Where consent is the lawful basis for processing, we seek consent that is free, specific, informed, unconditional and unambiguous and is signified through a clear affirmative action, in accordance with the DPDP Act and applicable rules as and when such provisions are in force. Where applicable law permits processing without consent, including for a recognised legitimate use, we may rely on such basis only to the extent permitted by law.
+
+7.1 Notice
+Before or at the time consent is requested, we will provide the notice required by applicable law in clear and plain language. Such notice may identify or itemise the personal data concerned, the specified purpose or purposes and the relevant goods, services or uses enabled by the processing, and will provide an accessible means to withdraw consent, exercise applicable rights and raise a grievance or complaint, as required by law.
+
+7.2 Manner of Consent
+Consent may be captured through explicit opt-in actions on the Platform, including checkboxes, toggles, permission prompts, digital confirmations or other affirmative mechanisms. We do not treat silence or inactivity as consent where affirmative consent is required. Where required or operationally made available under applicable law, consent may also be managed through a registered Consent Manager.
+
+7.3 Withdrawal of Consent
+Where processing is based on consent, you may withdraw that consent through the mechanism made available on the Platform or by writing to support@fanitt.com. Withdrawal will not affect the lawfulness of processing undertaken before withdrawal. Following a valid withdrawal, we will cease, and where required cause our Data Processors to cease, the relevant processing within a reasonable period, except where continued processing or retention is required or authorised by applicable law or is necessary to complete an existing transaction, resolve a dispute, comply with legal obligations or protect lawful rights.
+
+7.4 Persons Under 18
+The Platform is intended for persons who are 18 years of age or older. Persons under 18 may not create or operate an Account on Fanitt. We do not knowingly offer the Platform for use by children. If we become aware that personal data of a person under 18 has been collected contrary to this Policy, we may restrict or terminate the relevant Account and take reasonable steps to erase such data, subject to applicable legal retention requirements.
+
+8. Processing Without Separate Consent (Legitimate Uses)
+To the extent permitted by applicable law and as the relevant provisions come into force, we may process personal data without seeking separate consent in circumstances recognised by law, including certain cases where personal data has been voluntarily provided for a specified purpose, compliance with judicial or legal requirements, medical or safety emergencies, employment-related purposes, or other legitimate uses expressly permitted by applicable law. We will rely on such grounds only within their lawful scope.
+
+9. Cookies and Tracking Technologies
+We use cookies, SDKs and similar technologies to maintain sessions, remember preferences, provide and secure Platform functionality, understand usage, measure performance, improve discovery and recommendations, and support analytics or communications. Where required, non-essential technologies will be used subject to applicable notice or consent requirements. You may control certain cookies or permissions through browser, device or Platform settings; disabling them may affect some functionality.
+
+10. Sharing and Disclosure of Personal Data
+We do not sell personal data. We may share personal data, limited to what is reasonably necessary for the relevant purpose, with:
+- Other Users where necessary for discovery, communication, an engagement, transaction or Store interaction, subject to Platform settings and applicable policies;
+- Data Processors and technology providers supporting the Platform, including cloud, hosting, database, content-delivery, analytics, AI or matching technology, identity/KYC verification, fraud and security, communications, notifications, customer support, virtual meeting or live-streaming infrastructure and similar service providers;
+- Authorised payment gateways, payment aggregators, banking partners and other payment service providers required to process payments, settlements, refunds or payouts;
+- Government, regulatory, judicial or law-enforcement authorities where required by applicable law or valid legal process;
+- Professional advisers, including legal, financial, accounting, audit or insurance advisers, on a need-to-know basis and subject to appropriate confidentiality obligations;
+- A successor or prospective successor entity in connection with a lawful merger, restructuring, financing, acquisition, transfer or sale of all or part of the business or assets, subject to applicable law and appropriate safeguards.
+
+Where a third party acts as our Data Processor, we will impose contractual or other appropriate obligations concerning confidentiality, purpose limitation, security and processing in accordance with our instructions, to the extent required by applicable law. Some third parties may act as independent data fiduciaries or controllers for particular processing; where applicable, their own privacy terms may also apply.
+
+11. Cross-Border Processing and Transfer of Personal Data
+The Platform may use service providers, infrastructure or systems located in India or other jurisdictions. Personal data may therefore be stored or processed outside India where permitted by applicable law. Any cross-border processing or transfer will remain subject to restrictions or requirements imposed by the Central Government or other competent authority from time to time, and to appropriate contractual, technical or organisational safeguards where required.
+
+12. Data Retention and Erasure
+We retain personal data only for as long as reasonably necessary for the specified purpose for which it was collected or processed, or for such additional period as is required or permitted by applicable law.
+
+Subject to applicable law, personal data may be erased when consent is validly withdrawn and no other lawful basis requires continued processing, or when it is reasonable to assume that the specified purpose is no longer being served. We may retain limited personal data where reasonably necessary for legal, tax, accounting, anti-money-laundering, payment or chargeback records, consumer-protection obligations, fraud prevention, trust and safety, enforcement of Platform Terms, investigation of prohibited conduct, live grievances or disputes, or the establishment, exercise or defence of legal claims, in each case to the extent permitted by law.
+
+Where applicable law prescribes a particular retention or erasure period, inactivity period, advance notice requirement or other data-lifecycle obligation for a category of Data Fiduciary or processing activity, Fanitt will apply such requirement when it becomes applicable to the Platform.
+
+We treat personal data as confidential and restrict access to personnel and service providers who reasonably require it for the purposes described in this Policy, subject to appropriate access controls and obligations.
+
+13. Data Security
+We implement reasonable technical and organisational security safeguards appropriate to the nature of the personal data and the risks associated with processing. Depending on the relevant systems and processing, such safeguards may include:
+- Encryption of personal data in transit and, where appropriate, at rest;
+- Access controls, role-based permissions and authentication mechanisms;
+- Reasonable monitoring, logging, vulnerability management and security testing;
+- Confidentiality and security obligations for personnel, contractors and Data Processors;
+- Backup, recovery and business-continuity measures appropriate to relevant systems.
+
+No electronic system can be guaranteed to be completely secure. Accordingly, while we take reasonable safeguards, we do not represent that unauthorised access or security incidents can never occur.
+
+14. Personal Data Breach Notification
+If a Personal Data Breach occurs, we will take reasonable steps to contain, investigate and mitigate it and will notify the Data Protection Board of India, affected Data Principals or other competent authorities in the manner and within the timelines required by applicable law as and when such requirements apply.
+
+15. Rights of the Data Principal
+Subject to the DPDP Act, applicable rules, their commencement, and any lawful limitations or exceptions, a Data Principal may have rights including:
+- Right to Access Information: to obtain the information regarding personal data and processing made available under applicable law;
+- Right to Correction and Erasure: to seek correction of inaccurate or misleading personal data, completion or updating of personal data, and erasure where applicable and not subject to lawful retention;
+- Right to Grievance Redressal: to use the grievance mechanism made available by Fanitt in relation to processing of personal data or exercise of applicable rights;
+- Right to Nominate: where applicable, to nominate another individual to exercise rights in the event of death or incapacity;
+- Right to Withdraw Consent: where processing is based on consent, as described in Section 7.3.
+
+To exercise an applicable right, please use the mechanism made available through the Platform or write to support@fanitt.com. We may take reasonable steps to authenticate the request before acting on it and will respond within timelines required by applicable law.
+
+16. Privacy and Grievance Contact
+Fanitt has designated an authorised privacy and grievance contact for questions, concerns, grievances and requests relating to the processing of personal data. To preserve continuity where personnel or internal responsibilities change, the Platform identifies this function by designation rather than by naming an individual employee.
+
+Designation: Authorised Privacy & Grievance Contact
+Email: support@fanitt.com
+Address: Rago Vradicals LLP, House No. 40 & 41, Siddhi Vinayak Colony, Sukhi Sevaniya, Bhopal, Madhya Pradesh 462010, India
+
+We will acknowledge and address grievances and rights requests within the timelines required by applicable law. Where the law provides a right to approach the Data Protection Board of India or another competent authority after following the applicable grievance process, that right remains unaffected.
+
+17. Consent Manager
+Where required by applicable law or made operationally available, Users may be able to give, review, manage or withdraw consent through a Consent Manager registered in accordance with applicable law. Nothing in this section requires Fanitt to appoint or integrate a particular Consent Manager unless such requirement applies to Fanitt.
+
+18. Significant Data Fiduciary Obligations
+If Rago Vradicals LLP is notified by the Central Government as a "Significant Data Fiduciary" under the DPDP Act, it will comply with the additional obligations applicable to it, which may include appointment of a Data Protection Officer based in India, appointment of an independent data auditor, periodic Data Protection Impact Assessments, audits and such other measures as may be prescribed and in force.
+
+19. Changes to this Privacy Policy
+We may update this Policy from time to time to reflect changes in the Platform, our processing practices, technology, service providers, legal requirements or other operational needs. The current version will be published on the Platform with a revised "Last Updated" date. Where applicable law requires additional or prior notice, or renewed consent for a materially different purpose, we will provide such notice or seek such consent as required. Continued use of the Platform does not by itself override any consent requirement imposed by applicable law.
+
+20. Governing Law and Jurisdiction
+This Policy shall be governed by and construed in accordance with the laws of India. Subject to statutory rights, remedies, grievance mechanisms and jurisdiction that cannot lawfully be excluded or restricted, courts at Bhopal, Madhya Pradesh, India shall have jurisdiction over disputes arising out of or in connection with this Policy.
+
+21. Contact Us
+If you have questions about this Policy or how Fanitt handles personal data, please contact:
+Rago Vradicals LLP
+Registered Address: House No. 40 & 41, Siddhi Vinayak Colony, Sukhi Sevaniya, Bhopal, Madhya Pradesh 462010, India
+Email: support@fanitt.com
