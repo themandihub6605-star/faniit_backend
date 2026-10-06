@@ -27,8 +27,8 @@ async function sendPush(userId, { title, message, data = {} }) {
       tokens,
       notification: { title, body: message },
       data: stringData,
-      android: { priority: 'high', notification: { channelId: 'fanitt_default', color: '#F4511E' } },
-      apns: { payload: { aps: { sound: 'default' } } },
+           android: { priority: 'high', notification: { channelId: 'fanitt_alerts', sound: 'notification_app', color: '#F4511E' } },
+      apns: { payload: { aps: { sound: 'notification_app.wav' } } },
     });
 
     const dead = [];

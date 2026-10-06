@@ -225,6 +225,120 @@ const listLives = catchAsync(async (req, res) => {
   );
 });
 
+// ---------- discovery: home screen + community screen ----------
+
+const OPEN_STATUSES = [LIVE_STATUS.LIVE, LIVE_STATUS.SCHEDULED];
+const openLiveFilter = () => ({
+  $or: [{ status: LIVE_STATUS.LIVE }, { status: LIVE_STATUS.SCHEDULED, scheduledAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) } }],
+});
+
+async function myCommunityIds(userId) {
+  const Membership = mongoose.models.CommunityMembership;
+  if (!userId || !Membership) return [];
+  return Membership.find({ user: userId, status: 'active' }).distinct('community');
+}
+
+/** Who a live is for, in words the app can show on the card. */
+function audienceOf(live, communities) {
+  if (live.visibility !== LIVE_VISIBILITY.PRIVATE) return { type: 'everyone' };
+  if (live.privateMode === LIVE_PRIVATE_MODE.COMMUNITY) {
+    const c = communities.get(String(live.community)) || null;
+    return { type: 'community', communityId: live.community || null, communityName: c?.name || '', communitySlug: c?.slug || '', communityIconUrl: c?.iconUrl || '' };
+  }
+  if (live.privateMode === LIVE_PRIVATE_MODE.SELECTED) return { type: 'selected' };
+  return { type: 'invite' };
+}
+
+/** Lives + store, host, community and "my ticket" info for cards. */
+async function enrichLives(lives, user) {
+  if (!lives.length) return [];
+  const Community = mongoose.models.Community;
+  const communityIds = [...new Set(lives.map((l) => l.community).filter(Boolean).map(String))];
+  const [stores, hosts, communities, tickets] = await Promise.all([
+    Store.find({ _id: { $in: lives.map((l) => l.store) } }).select('name slug logoUrl'),
+    User.find({ _id: { $in: lives.map((l) => l.host) } }).select('name avatarUrl'),
+    communityIds.length && Community ? Community.find({ _id: { $in: communityIds } }).select('name slug iconUrl') : [],
+    user
+      ? StoreOrder.find({ buyer: user._id, itemId: { $in: lives.map((l) => l._id) }, status: ORDER_STATUS.PAID }).distinct('itemId')
+      : [],
+  ]);
+  const storeMap = new Map(stores.map((x) => [String(x._id), x]));
+  const hostMap = new Map(hosts.map((x) => [String(x._id), x]));
+  const communityMap = new Map(communities.map((x) => [String(x._id), x]));
+  const ticketSet = new Set(tickets.map(String));
+
+  return lives.map((l) => {
+    const st = storeMap.get(String(l.store));
+    const h = hostMap.get(String(l.host));
+    const isHost = Boolean(user) && String(l.host) === String(user._id);
+    return publicLive(l, {
+      store: st ? { _id: st._id, name: st.name, slug: st.slug, logoUrl: st.logoUrl } : l.store,
+      hostInfo: { name: h?.name || '', avatarUrl: h?.avatarUrl || '' },
+      audience: audienceOf(l, communityMap),
+      me: { isHost, hasTicket: isHost || ticketSet.has(String(l._id)) },
+    });
+  });
+}
+
+function sortOpenLives(lives) {
+  return lives.sort((a, b) => {
+    const aLive = a.status === LIVE_STATUS.LIVE ? 1 : 0;
+    const bLive = b.status === LIVE_STATUS.LIVE ? 1 : 0;
+    if (aLive !== bLive) return bLive - aLive;
+    if (aLive) return (b.stats?.currentViewers || 0) - (a.stats?.currentViewers || 0);
+    return new Date(a.scheduledAt || 0) - new Date(b.scheduledAt || 0);
+  });
+}
+
+/**
+ * GET /api/store/lives/discover — live + upcoming lives this person can
+ * watch: public ones, plus private ones they're allowed into (their
+ * communities, hand-picked, invite already used, or their own).
+ */
+const discoverLives = catchAsync(async (req, res) => {
+  const limit = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const activeStores = await Store.find({ status: STORE_STATUS.ACTIVE }).distinct('_id');
+  const audience = [{ visibility: LIVE_VISIBILITY.PUBLIC }];
+  if (req.user) {
+    const uid = req.user._id;
+    const communities = await myCommunityIds(uid);
+    audience.push(
+      { host: uid },
+      { visibility: LIVE_VISIBILITY.PRIVATE, privateMode: LIVE_PRIVATE_MODE.SELECTED, allowedUsers: uid },
+      { visibility: LIVE_VISIBILITY.PRIVATE, privateMode: LIVE_PRIVATE_MODE.INVITE, invitedUsers: uid }
+    );
+    if (communities.length) {
+      audience.push({ visibility: LIVE_VISIBILITY.PRIVATE, privateMode: LIVE_PRIVATE_MODE.COMMUNITY, community: { $in: communities } });
+    }
+  }
+  const lives = await LiveStream.find({ store: { $in: activeStores }, $and: [openLiveFilter(), { $or: audience }] })
+    .sort({ status: 1, scheduledAt: 1 })
+    .limit(60);
+  const visible = sortOpenLives(lives).slice(0, limit);
+  return new ApiResponse(200, { lives: await enrichLives(visible, req.user) }, 'Lives fetched').send(res);
+});
+
+/**
+ * GET /api/store/lives/community/:communityId — lives made for this
+ * community. Non-members see them too (locked), so they know to join.
+ */
+const communityLives = catchAsync(async (req, res) => {
+  const { communityId } = req.params;
+  if (!mongoose.isValidObjectId(communityId)) throw ApiError.notFound('Community not found');
+  const activeStores = await Store.find({ status: STORE_STATUS.ACTIVE }).distinct('_id');
+  const lives = await LiveStream.find({
+    store: { $in: activeStores },
+    visibility: LIVE_VISIBILITY.PRIVATE,
+    privateMode: LIVE_PRIVATE_MODE.COMMUNITY,
+    community: communityId,
+    ...openLiveFilter(),
+  }).limit(20);
+
+  const Membership = mongoose.models.CommunityMembership;
+  const isMember = Boolean(req.user && Membership && (await Membership.exists({ community: communityId, user: req.user._id, status: 'active' })));
+  return new ApiResponse(200, { lives: await enrichLives(sortOpenLives(lives), req.user), isMember }, 'Community lives').send(res);
+});
+
 /** GET /api/store/lives/:id?invite=CODE — details + what this user can do. */
 const getLive = catchAsync(async (req, res) => {
   const { live, store } = await loadVisibleLive(req.params.id);
@@ -295,6 +409,8 @@ module.exports = {
   endLive,
   cancelLive,
   listLives,
+  discoverLives,
+  communityLives,
   getLive,
   buyTicket,
   joinLive,

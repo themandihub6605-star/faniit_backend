@@ -6,6 +6,7 @@ const { uploadImage } = require('../../middlewares/upload.middleware');
 const v = require('../validators/store.validators');
 const admin = require('../controllers/admin.controller');
 const analytics = require('../controllers/analytics.controller');
+const meets = require('../controllers/adminMeet.controller');
 
 const router = express.Router();
 router.use(protect, authorize('admin'));
@@ -35,6 +36,15 @@ router.get('/lives', admin.listLives);
 router.post('/lives/:id/end', validate(v.reasonSchema), admin.endLive);
 router.get('/calls', admin.listCalls);
 router.post('/calls/:id/end', admin.endCall);
+
+// Live Sessions (Virtual Meets)
+router.get('/meets', meets.listMeets);
+router.get('/meets/:id', meets.getMeet);
+router.get('/meets/:id/participants', meets.listParticipants);
+router.post('/meets/:id/join', meets.joinMeet);
+router.post('/meets/:id/participants/:identity/remove', meets.removeParticipant);
+router.post('/meets/:id/end', validate(v.reasonSchema), meets.endMeet);
+router.post('/meets/:id/cancel', validate(v.reasonSchema), meets.cancelMeet);
 
 router.get('/settings', admin.getSettings);
 router.patch('/settings', validate(v.settingsSchema), admin.updateSettings);

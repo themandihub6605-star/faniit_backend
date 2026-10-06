@@ -26,6 +26,8 @@ router.get('/stores/:slugOrUserId', optionalAuth, shop.getStore);
 router.get('/products', optionalAuth, shop.listProducts);
 router.get('/products/:id', optionalAuth, shop.getProduct);
 router.get('/lives', live.listLives);
+router.get('/lives/discover', optionalAuth, live.discoverLives);
+router.get('/lives/community/:communityId', optionalAuth, live.communityLives);
 router.get('/lives/:id', optionalAuth, live.getLive);
 router.get('/meets', optionalAuth, meet.listMeets);
 router.get('/meets/:id', optionalAuth, meet.getMeet);

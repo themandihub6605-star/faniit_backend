@@ -36,7 +36,7 @@ function rooms() {
  * `canPublish` = can send audio/video (host, or both people in a call).
  * Everyone can send data messages (chat, reactions) unless `canChat` is false.
  */
-async function createToken({ roomName, identity, name, canPublish, canChat = true, ttl, metadata }) {
+async function createToken({ roomName, identity, name, canPublish, canChat = true, hidden = false, ttl, metadata }) {
   const { url, apiKey, apiSecret } = config();
   const token = new AccessToken(apiKey, apiSecret, {
     identity: String(identity),
@@ -50,6 +50,8 @@ async function createToken({ roomName, identity, name, canPublish, canChat = tru
     canPublish: Boolean(canPublish),
     canSubscribe: true,
     canPublishData: Boolean(canChat),
+    // Hidden participants (admin watching silently) aren't shown to others.
+    hidden: Boolean(hidden),
   });
   return { url, token: await token.toJwt(), roomName };
 }
@@ -74,6 +76,41 @@ async function closeRoom(roomName) {
   }
 }
 
+/** Who is in a room right now. Empty when the room doesn't exist. */
+async function listParticipants(roomName) {
+  if (!isConfigured()) return [];
+  try {
+    const people = await rooms().listParticipants(roomName);
+    return people.map((p) => {
+      let meta = {};
+      try {
+        meta = p.metadata ? JSON.parse(p.metadata) : {};
+      } catch {
+        meta = {};
+      }
+      const tracks = p.tracks || [];
+      return {
+        identity: p.identity,
+        name: p.name || 'Guest',
+        role: meta.role || 'guest',
+        joinedAt: p.joinedAt ? new Date(Number(p.joinedAt) * 1000) : null,
+        hidden: Boolean(p.permission?.hidden),
+        // TrackType: 0 = audio, 1 = video
+        audioOn: tracks.some((t) => t.type === 0 && !t.muted),
+        videoOn: tracks.some((t) => t.type === 1 && !t.muted),
+      };
+    });
+  } catch (err) {
+    log.warn('livekit.list_participants_failed', { roomName, message: err?.message });
+    return [];
+  }
+}
+
+/** Removes one person from a room (they can rejoin if still allowed). */
+async function removeParticipant(roomName, identity) {
+  await rooms().removeParticipant(roomName, String(identity));
+}
+
 let receiver = null;
 /** Verifies and parses a LiveKit webhook. Throws on a bad signature. */
 async function parseWebhook(rawBody, authHeader) {
@@ -82,4 +119,4 @@ async function parseWebhook(rawBody, authHeader) {
   return receiver.receive(rawBody, authHeader);
 }
 
-module.exports = { createToken, ensureRoom, closeRoom, parseWebhook, isConfigured };
+module.exports = { createToken, ensureRoom, closeRoom, listParticipants, removeParticipant, parseWebhook, isConfigured };
