@@ -8,11 +8,29 @@ const settingsService = require('../services/settings.service');
 const storage = require('../services/storage.service');
 const { ownerStore } = require('../utils/serialize');
 const log = require('../utils/logger');
+const subscriptionService = require('../../services/subscription.service');
 
 // Creator side: open a store and walk the four setup steps.
 
+/** Is the creator on a paid Fanitt plan right now? (free default plan = no) */
+async function subscriptionOf(userId) {
+  try {
+    const sub = await subscriptionService.getOrCreateActiveSubscription(userId, 'creator');
+    const plan = sub?.plan || {};
+    const active = sub?.status === 'active' && (plan.price || 0) > 0 && (!sub.currentPeriodEnd || new Date(sub.currentPeriodEnd) > new Date());
+    return { hasSubscription: active, planName: plan.name || '' };
+  } catch (err) {
+    log.warn('store.subscription_check_failed', { userId: String(userId), message: err?.message });
+    return { hasSubscription: false, planName: '' };
+  }
+}
+
 async function respondWithMyStore(res, userId, message, status = 200) {
-  const [store, settings] = await Promise.all([storeService.findMyStore(userId, { withPrivate: true }), settingsService.getSettings()]);
+  const [store, settings, sub] = await Promise.all([
+    storeService.findMyStore(userId, { withPrivate: true }),
+    settingsService.getSettings(),
+    subscriptionOf(userId),
+  ]);
   return new ApiResponse(
     status,
     {
@@ -20,6 +38,7 @@ async function respondWithMyStore(res, userId, message, status = 200) {
       steps: storeService.setupSteps(store, settings),
       terms: { version: settings.termsVersion, text: settings.termsText },
       fees: { storeFeePercent: settings.storeFeePercent, fanboxFeePercent: settings.fanboxFeePercent },
+      access: { subscriptionRequired: Boolean(settings.requireSubscription), hasSubscription: sub.hasSubscription, planName: sub.planName },
     },
     message
   ).send(res);
@@ -32,6 +51,15 @@ const getMyStore = catchAsync(async (req, res) => respondWithMyStore(res, req.us
 const createStore = catchAsync(async (req, res) => {
   const creator = await storeService.requireCreatorProfile(req.user._id);
   if (await Store.exists({ user: req.user._id })) throw ApiError.conflict('You already have a store', [], 'STORE_EXISTS');
+
+  // Admin switch (Fanitt Store → Settings): new stores need a paid plan.
+  const settings = await settingsService.getSettings();
+  if (settings.requireSubscription) {
+    const sub = await subscriptionOf(req.user._id);
+    if (!sub.hasSubscription) {
+      throw new ApiError(403, 'Choose a Fanitt plan (monthly or yearly) to open your store', [], 'SUBSCRIPTION_REQUIRED');
+    }
+  }
 
   const slug = await storeService.uniqueSlug(creator.slug || req.body.name);
   const store = await Store.create({

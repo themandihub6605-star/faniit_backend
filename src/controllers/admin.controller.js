@@ -20,6 +20,7 @@ const {
 const escrowService = require('../services/escrow.service');
 const subscriptionService = require('../services/subscription.service');
 const { sendAccountApprovedEmail, sendAccountRejectedEmail, sendWithdrawalCompletedEmail, sendWithdrawalRejectedEmail } = require('../services/email.service');
+const { alertUser } = require('../services/alert.service');
 const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
@@ -27,6 +28,11 @@ const ApiError = require('../utils/apiError');
 const { VERIFICATION_STATUS, TRANSACTION_STATUS, ROLES, SUBSCRIPTION_STATUS } = require('../constants/enums');
 
 // Agency profiles reuse their owner's 8-character user referral code.
+
+/** Amounts are stored in paise. */
+function rupees(paise) {
+  return `₹${(Number(paise || 0) / 100).toLocaleString('en-IN')}`;
+}
 
 // ---------- Users ----------
 
@@ -83,6 +89,24 @@ const suspendUser = catchAsync(async (req, res) => {
   const { reason } = req.body;
   const user = await User.findByIdAndUpdate(req.params.id, { isSuspended: true, suspensionReason: reason || '' }, { new: true });
   if (!user) throw ApiError.notFound('User not found');
+
+  alertUser({
+    userId: user._id,
+    fromUser: req.user._id,
+    type: 'account_update',
+    title: 'Your Fanitt account has been suspended',
+    message: reason ? `Your account was suspended: ${reason}` : 'Your account was suspended. Contact support for help.',
+    relatedModel: 'User',
+    relatedId: user._id,
+    email: {
+      body: 'Your Fanitt account has been suspended, so you can’t log in or use Fanitt for now. If you think this is a mistake, reply to this email or write to support.',
+      reason,
+      reasonLabel: 'Reason',
+      tone: 'danger',
+      ctaUrl: null,
+    },
+  });
+
   return new ApiResponse(200, user, 'User suspended').send(res);
 });
 
@@ -90,6 +114,18 @@ const suspendUser = catchAsync(async (req, res) => {
 const reinstateUser = catchAsync(async (req, res) => {
   const user = await User.findByIdAndUpdate(req.params.id, { isSuspended: false, suspensionReason: '' }, { new: true });
   if (!user) throw ApiError.notFound('User not found');
+
+  alertUser({
+    userId: user._id,
+    fromUser: req.user._id,
+    type: 'account_update',
+    title: 'Your Fanitt account is active again',
+    message: 'Your account has been reinstated. You can log in and use Fanitt as before.',
+    relatedModel: 'User',
+    relatedId: user._id,
+    email: { tone: 'success', ctaUrl: 'https://fanitt.com/login', ctaLabel: 'Log in' },
+  });
+
   return new ApiResponse(200, user, 'User reinstated').send(res);
 });
 
@@ -110,7 +146,7 @@ const verifyCreator = catchAsync(async (req, res) => {
     req.params.id,
     { verificationStatus: decision, rejectionReason: decision === 'rejected' ? rejectionReason || '' : '' },
     { new: true }
-  ).populate('user', 'name email');
+  ).populate('user', '_id name email');
   if (!creator) throw ApiError.notFound('Creator not found');
 
   if (creator.user?.email) {
@@ -118,6 +154,23 @@ const verifyCreator = catchAsync(async (req, res) => {
       sendAccountApprovedEmail({ to: creator.user.email, name: creator.user.name, role: 'creator' });
     } else if (decision === VERIFICATION_STATUS.REJECTED) {
       sendAccountRejectedEmail({ to: creator.user.email, name: creator.user.name, role: 'creator', reason: rejectionReason });
+    }
+  }
+  if (creator.user?._id) {
+    const approved = decision === VERIFICATION_STATUS.VERIFIED;
+    const rejected = decision === VERIFICATION_STATUS.REJECTED;
+    if (approved || rejected) {
+      alertUser({
+        userId: creator.user._id,
+        fromUser: req.user._id,
+        type: approved ? 'account_verified' : 'account_update',
+        title: approved ? 'Your creator profile is approved 🎉' : 'Your creator profile needs changes',
+        message: approved
+          ? 'Your dashboard is fully unlocked. Start exploring Fanitt now.'
+          : `Your profile wasn’t approved${rejectionReason ? `: ${rejectionReason}` : ''}. Update your details and submit again.`,
+        relatedModel: 'User',
+        relatedId: creator.user._id,
+      });
     }
   }
 
@@ -130,7 +183,7 @@ const verifyBrand = catchAsync(async (req, res) => {
     req.params.id,
     { verificationStatus: decision, rejectionReason: decision === 'rejected' ? rejectionReason || '' : '' },
     { new: true }
-  ).populate('user', 'name email');
+  ).populate('user', '_id name email');
   if (!brand) throw ApiError.notFound('Brand not found');
 
   if (brand.user?.email) {
@@ -138,6 +191,23 @@ const verifyBrand = catchAsync(async (req, res) => {
       sendAccountApprovedEmail({ to: brand.user.email, name: brand.user.name, role: 'brand' });
     } else if (decision === VERIFICATION_STATUS.REJECTED) {
       sendAccountRejectedEmail({ to: brand.user.email, name: brand.user.name, role: 'brand', reason: rejectionReason });
+    }
+  }
+  if (brand.user?._id) {
+    const approved = decision === VERIFICATION_STATUS.VERIFIED;
+    const rejected = decision === VERIFICATION_STATUS.REJECTED;
+    if (approved || rejected) {
+      alertUser({
+        userId: brand.user._id,
+        fromUser: req.user._id,
+        type: approved ? 'account_verified' : 'account_update',
+        title: approved ? 'Your brand profile is approved 🎉' : 'Your brand profile needs changes',
+        message: approved
+          ? 'Your dashboard is fully unlocked. Start exploring Fanitt now.'
+          : `Your profile wasn’t approved${rejectionReason ? `: ${rejectionReason}` : ''}. Update your details and submit again.`,
+        relatedModel: 'User',
+        relatedId: brand.user._id,
+      });
     }
   }
 
@@ -219,7 +289,7 @@ const verifyAgency = catchAsync(async (req, res) => {
     req.params.id,
     { verificationStatus: decision, rejectionReason: decision === 'rejected' ? rejectionReason || '' : '' },
     { new: true }
-  ).populate('user', 'name email');
+  ).populate('user', '_id name email');
   if (!agency) throw ApiError.notFound('Agency not found');
 
   if (agency.user?.email) {
@@ -227,6 +297,23 @@ const verifyAgency = catchAsync(async (req, res) => {
       sendAccountApprovedEmail({ to: agency.user.email, name: agency.user.name, role: 'agency' });
     } else if (decision === VERIFICATION_STATUS.REJECTED) {
       sendAccountRejectedEmail({ to: agency.user.email, name: agency.user.name, role: 'agency', reason: rejectionReason });
+    }
+  }
+  if (agency.user?._id) {
+    const approved = decision === VERIFICATION_STATUS.VERIFIED;
+    const rejected = decision === VERIFICATION_STATUS.REJECTED;
+    if (approved || rejected) {
+      alertUser({
+        userId: agency.user._id,
+        fromUser: req.user._id,
+        type: approved ? 'account_verified' : 'account_update',
+        title: approved ? 'Your agency profile is approved 🎉' : 'Your agency profile needs changes',
+        message: approved
+          ? 'Your dashboard is fully unlocked. Start exploring Fanitt now.'
+          : `Your profile wasn’t approved${rejectionReason ? `: ${rejectionReason}` : ''}. Update your details and submit again.`,
+        relatedModel: 'User',
+        relatedId: agency.user._id,
+      });
     }
   }
 
@@ -473,6 +560,16 @@ const markWithdrawalProcessing = catchAsync(async (req, res) => {
   withdrawal.processedBy = req.user._id;
   await withdrawal.save();
 
+  alertUser({
+    userId: withdrawal.user,
+    fromUser: req.user._id,
+    type: 'withdrawal_update',
+    title: 'Your withdrawal is being processed',
+    message: `We're sending ${rupees(withdrawal.netPayoutAmount || withdrawal.amount)} to your account. You'll be notified once it's paid.`,
+    relatedModel: 'Withdrawal',
+    relatedId: withdrawal._id,
+  });
+
   return new ApiResponse(200, withdrawal, 'Withdrawal marked as processing').send(res);
 });
 
@@ -496,6 +593,15 @@ const markWithdrawalPaid = catchAsync(async (req, res) => {
       payoutMethod: withdrawal.payoutMethod,
     });
   }
+  alertUser({
+    userId: withdrawal.user?._id,
+    fromUser: req.user._id,
+    type: 'payout_released',
+    title: 'Withdrawal paid 💸',
+    message: `${rupees(withdrawal.netPayoutAmount || withdrawal.amount)} has been sent to your ${withdrawal.payoutMethod === 'upi' ? 'UPI' : 'bank account'}.`,
+    relatedModel: 'Withdrawal',
+    relatedId: withdrawal._id,
+  });
 
   return new ApiResponse(200, withdrawal, 'Withdrawal marked as completed').send(res);
 });
@@ -524,6 +630,15 @@ const rejectWithdrawal = catchAsync(async (req, res) => {
       reason,
     });
   }
+  alertUser({
+    userId: withdrawal.user?._id,
+    fromUser: req.user._id,
+    type: 'withdrawal_update',
+    title: 'Withdrawal rejected',
+    message: `${rupees(withdrawal.amount)} is back in your wallet${reason ? `. Reason: ${reason}` : ''}.`,
+    relatedModel: 'Withdrawal',
+    relatedId: withdrawal._id,
+  });
 
   return new ApiResponse(200, withdrawal, 'Withdrawal rejected and refunded to wallet').send(res);
 });
@@ -710,6 +825,17 @@ const setUserSubscription = catchAsync(async (req, res) => {
   sub.razorpaySubscriptionId = '';
   sub.cancelAtPeriodEnd = false;
   await sub.save();
+
+  alertUser({
+    userId: targetUser._id,
+    fromUser: req.user._id,
+    type: 'subscription_update',
+    title: `You're now on the ${plan.name} plan`,
+    message: `Fanitt has activated the ${plan.name} plan on your account, valid till ${periodEnd.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.`,
+    relatedModel: 'User',
+    relatedId: targetUser._id,
+    email: { tone: 'success' },
+  });
 
   return new ApiResponse(200, sub, `User moved to ${plan.name}`).send(res);
 });

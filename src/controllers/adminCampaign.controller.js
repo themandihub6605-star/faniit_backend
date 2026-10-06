@@ -9,11 +9,13 @@ const {
   SiteSettings,
 } = require('../models');
 const notificationService = require('../services/notification.service');
+const { alertUser } = require('../services/alert.service');
 const subscriptionService = require('../services/subscription.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { CAMPAIGN_STATUS } = require('../constants/enums');
+const { escapeHtml } = require('../services/email.service');
 
 function escapeRegex(value) {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -142,17 +144,16 @@ const approveCampaign = catchAsync(async (req, res) => {
 
   const userId = await brandUserId(campaign);
   if (userId) {
-    await notificationService
-      .notify({
-        userId,
-        fromUser: req.user._id,
-        type: 'campaign_update',
-        title: 'Campaign approved 🎉',
-        message: `"${campaign.title}" is now live and creators can apply.`,
-        relatedModel: 'Campaign',
-        relatedId: campaign._id,
-      })
-      .catch(() => {});
+    await alertUser({
+      userId,
+      fromUser: req.user._id,
+      type: 'campaign_update',
+      title: 'Campaign approved 🎉',
+      message: `"${campaign.title}" is now live and creators can apply.`,
+      relatedModel: 'Campaign',
+      relatedId: campaign._id,
+      email: { tone: 'success', ctaUrl: 'https://fanitt.com/dashboard/brand', ctaLabel: 'View campaign' },
+    });
   }
 
   return new ApiResponse(200, campaign, 'Campaign approved and live').send(res);
@@ -184,17 +185,23 @@ const rejectCampaign = catchAsync(async (req, res) => {
   const userId = await brandUserId(campaign);
   if (userId) {
     await subscriptionService.releaseBrandCampaignSlot(userId).catch(() => {});
-    await notificationService
-      .notify({
-        userId,
-        fromUser: req.user._id,
-        type: 'campaign_update',
-        title: 'Campaign needs changes',
-        message: `"${campaign.title}" wasn't approved: ${reason}. Edit it and submit again.`,
-        relatedModel: 'Campaign',
-        relatedId: campaign._id,
-      })
-      .catch(() => {});
+    await alertUser({
+      userId,
+      fromUser: req.user._id,
+      type: 'campaign_update',
+      title: 'Campaign needs changes',
+      message: `"${campaign.title}" wasn't approved: ${reason}. Edit it and submit again.`,
+      relatedModel: 'Campaign',
+      relatedId: campaign._id,
+      email: {
+        body: `Your campaign <b>${escapeHtml(campaign.title)}</b> wasn’t approved yet. Edit it and submit again — it’ll go live once approved.`,
+        reason,
+        reasonLabel: 'What to change',
+        tone: 'danger',
+        ctaUrl: 'https://fanitt.com/dashboard/brand',
+        ctaLabel: 'Edit campaign',
+      },
+    });
   }
 
   return new ApiResponse(200, campaign, 'Campaign sent back to the brand').send(res);
@@ -218,17 +225,22 @@ const unpublishCampaign = catchAsync(async (req, res) => {
 
   const userId = await brandUserId(campaign);
   if (userId) {
-    await notificationService
-      .notify({
-        userId,
-        fromUser: req.user._id,
-        type: 'campaign_update',
-        title: 'Campaign taken down',
-        message: `"${campaign.title}" was removed from Fanitt: ${reason}`,
-        relatedModel: 'Campaign',
-        relatedId: campaign._id,
-      })
-      .catch(() => {});
+    await alertUser({
+      userId,
+      fromUser: req.user._id,
+      type: 'campaign_update',
+      title: 'Campaign taken down',
+      message: `"${campaign.title}" was removed from Fanitt: ${reason}`,
+      relatedModel: 'Campaign',
+      relatedId: campaign._id,
+      email: {
+        body: `Your campaign <b>${escapeHtml(campaign.title)}</b> was taken down from Fanitt.`,
+        reason,
+        reasonLabel: 'Reason',
+        tone: 'danger',
+        ctaUrl: 'https://fanitt.com/dashboard/brand',
+      },
+    });
   }
   // Tell creators who applied.
   const apps = await Application.find({ campaign: campaign._id, status: 'pending' }).select('creator');

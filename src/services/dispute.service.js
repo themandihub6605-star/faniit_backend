@@ -2,6 +2,7 @@ const { Campaign, Milestone, Dispute, Transaction, CreatorProfile, BrandProfile 
 const { TRANSACTION_TYPE, TRANSACTION_STATUS, MILESTONE_STATUS, DISPUTE_STATUS, DISPUTE_OUTCOME } = require('../constants/enums');
 const walletService = require('./wallet.service');
 const notificationService = require('./notification.service');
+const { alertUser } = require('./alert.service');
 const { checkAndCompleteCampaign } = require('./milestone.service');
 const ApiError = require('../utils/apiError');
 
@@ -44,6 +45,27 @@ async function resolveDispute({ disputeId, adminUserId, outcome, creatorAmount, 
     milestone.status = MILESTONE_STATUS.FUNDED;
     milestone.autoReleaseAt = null;
     await milestone.save();
+
+    const creatorProfile = await CreatorProfile.findById(milestone.creator).select('user');
+    const note = adminNotes ? ` Note from Fanitt: ${adminNotes}` : '';
+    await alertUser({
+      userId: creatorProfile?.user,
+      type: 'dispute_resolved',
+      title: 'Dispute resolved — revision needed',
+      message: `Please redo and resubmit "${milestone.title}" for "${campaign.title}". The payment stays safe in escrow.${note}`,
+      relatedModel: 'Campaign',
+      relatedId: campaign._id,
+      email: { ctaUrl: 'https://fanitt.com/dashboard/creator', ctaLabel: 'Open campaign' },
+    });
+    await alertUser({
+      userId: brandProfile?.user,
+      type: 'dispute_resolved',
+      title: 'Dispute resolved — revision requested',
+      message: `The creator will redo and resubmit "${milestone.title}" for "${campaign.title}". The payment stays in escrow.${note}`,
+      relatedModel: 'Campaign',
+      relatedId: campaign._id,
+      email: { ctaUrl: 'https://fanitt.com/dashboard/brand', ctaLabel: 'Open campaign' },
+    });
   } else {
     let payoutToCreator = 0;
     let refundToBrand = 0;
@@ -91,7 +113,8 @@ async function resolveDispute({ disputeId, adminUserId, outcome, creatorAmount, 
       await walletService.creditCreator(milestone.creator, netAmount);
       milestone.payoutTransaction = payoutTransaction._id;
 
-      await notificationService.notify({
+      await alertUser({
+        email: { tone: 'success', ctaUrl: 'https://fanitt.com/dashboard/creator', ctaLabel: 'View wallet' },
         userId: creator.user._id,
         type: 'payout_released',
         title: 'Dispute resolved — payment released',
@@ -115,7 +138,8 @@ async function resolveDispute({ disputeId, adminUserId, outcome, creatorAmount, 
         notes: `Dispute resolution refund (${outcome})`,
       });
 
-      await notificationService.notify({
+      await alertUser({
+        email: { ctaUrl: 'https://fanitt.com/dashboard/brand', ctaLabel: 'Open Fanitt' },
         userId: brandProfile.user,
         type: 'dispute_refund',
         title: 'Dispute resolved — refund issued',

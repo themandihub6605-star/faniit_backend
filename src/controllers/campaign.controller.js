@@ -2,6 +2,7 @@ const { Campaign, Application, BrandProfile, CreatorProfile, User, SiteSettings 
 const paymentService = require('../services/payment.service');
 const escrowService = require('../services/escrow.service');
 const notificationService = require('../services/notification.service');
+const { alertUser } = require('../services/alert.service');
 const subscriptionService = require('../services/subscription.service');
 const milestoneService = require('../services/milestone.service');
 const catchAsync = require('../utils/catchAsync');
@@ -417,13 +418,14 @@ const applyToCampaign = catchAsync(async (req, res) => {
   }
 
   const brandProfile = await BrandProfile.findById(campaign.brand).select('user');
-  await notificationService.notify({
+  await alertUser({
     userId: brandProfile?.user,
     type: 'proposal_received',
     title: 'New proposal received',
     message: `A creator sent a proposal for "${campaign.title}".`,
     relatedModel: 'Campaign',
     relatedId: campaign._id,
+    email: { ctaUrl: 'https://fanitt.com/dashboard/brand', ctaLabel: 'Review proposal' },
   });
 
   return new ApiResponse(201, application, 'Proposal sent').send(res);
@@ -576,8 +578,13 @@ const decideApplication = catchAsync(async (req, res) => {
     }
   }
 
-  await notificationService.notify({
-    userId: (await CreatorProfile.findById(application.creator)).user,
+  await alertUser({
+    userId: (await CreatorProfile.findById(application.creator))?.user,
+    email: {
+      tone: decision === 'accepted' ? 'success' : 'danger',
+      ctaUrl: 'https://fanitt.com/dashboard/creator',
+      ctaLabel: decision === 'accepted' ? 'Open campaign' : 'Find more campaigns',
+    },
     type: 'proposal_status_update',
     title: decision === 'accepted' ? 'Proposal accepted!' : 'Proposal declined',
     message:

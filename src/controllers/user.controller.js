@@ -3,6 +3,7 @@ const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { TRANSACTION_TYPE } = require('../constants/enums');
+const { alertUser } = require('../services/alert.service');
 
 const updateMe = catchAsync(async (req, res) => {
   const { name, phone } = req.body;
@@ -33,11 +34,33 @@ const getUserById = catchAsync(async (req, res) => {
 });
 
 const deleteMe = catchAsync(async (req, res) => {
-  // Deactivates the account: login, refresh and every protected route
-  // reject it from now on, and the device stops receiving pushes.
-  await User.findByIdAndUpdate(req.user._id, { isActive: false, pushTokens: [] });
+  // Locks the account right away (login, refresh and every protected route
+  // reject it) and sends it to the admin for approval. Once approved the
+  // account is deleted and the email can be used for a new signup.
+  const reason = String(req.body?.reason || '').trim().slice(0, 500);
+  await User.findByIdAndUpdate(req.user._id, {
+    isActive: false,
+    pushTokens: [],
+    deletionStatus: 'pending',
+    deletionRequestedAt: new Date(),
+    deletionReason: reason,
+  });
   res.clearCookie('refreshToken');
-  return new ApiResponse(200, null, 'Account deleted').send(res);
+
+  // Confirmation by email (the app is signed out, so no in-app notification).
+  alertUser({
+    userId: req.user._id,
+    inApp: false,
+    title: 'We received your account deletion request',
+    message: 'Your Fanitt account is locked and will be deleted after our team reviews the request.',
+    email: {
+      to: req.user.email,
+      name: req.user.name,
+      body: 'Your Fanitt account is now locked and will be deleted once our team reviews the request. After that you can sign up again with this email. If you didn’t ask for this, reply to this email right away.',
+    },
+  });
+
+  return new ApiResponse(200, null, 'Deletion request sent. Your account will be deleted after review.').send(res);
 });
 
 /** POST /api/users/me/push-token — { token, platform } registers this device. */

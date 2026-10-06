@@ -251,6 +251,7 @@ const storeStatusSchema = z.discriminatedUnion('action', [
 const settingsSchema = z.object({
   storeFeePercent: z.number().min(0).max(50).optional(),
   fanboxFeePercent: z.number().min(0).max(50).optional(),
+  requireSubscription: z.boolean().optional(),
   termsVersion: z.string().trim().min(1).max(20).optional(),
   termsText: z.string().trim().min(20).max(20000).optional(),
 });

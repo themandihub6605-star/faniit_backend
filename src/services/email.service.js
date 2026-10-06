@@ -59,6 +59,46 @@ async function sendEmail({ to, subject, html, text }) {
   }
 }
 
+// ---------- Generic notice (approvals, rejections, account updates) ----------
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+const NOTICE_TONES = {
+  success: { color: '#16a34a', bg: '#f0fdf4', border: '#22c55e', text: '#166534' },
+  danger: { color: '#ef4444', bg: '#fef2f2', border: '#ef4444', text: '#991b1b' },
+  info: { color: '#F9436E', bg: '#fff7ed', border: '#F4511E', text: '#9a3412' },
+};
+
+/** One email shape for every status update: heading, message, an optional
+ * highlighted reason box and an optional button. `message` may contain
+ * simple HTML; `reason` is user/admin text and is escaped. */
+async function sendNoticeEmail({ to, name, subject, heading, message, reason, reasonLabel, ctaUrl, ctaLabel, tone = 'info' }) {
+  const t = NOTICE_TONES[tone] || NOTICE_TONES.info;
+  await sendEmail({
+    to,
+    subject,
+    html: wrapEmail(`
+      <h2 style="color: ${t.color};">${escapeHtml(heading || subject)}</h2>
+      ${name ? `<p>Hi ${escapeHtml(name)},</p>` : ''}
+      <p>${message}</p>
+      ${
+        reason
+          ? `<p style="background: ${t.bg}; border-left: 3px solid ${t.border}; padding: 12px 16px; color: ${t.text};">${
+              reasonLabel ? `<b>${escapeHtml(reasonLabel)}:</b> ` : ''
+            }${escapeHtml(reason)}</p>`
+          : ''
+      }
+      ${ctaUrl ? ctaButton(ctaUrl, ctaLabel || 'Open Fanitt') : ''}
+    `),
+  });
+}
+
 // ---------- Account approval ----------
 
 async function sendAccountApprovedEmail({ to, name, role }) {
@@ -276,6 +316,8 @@ async function sendSessionCancelledEmail({ to, name, sessionTitle, scheduledAt, 
 
 module.exports = {
   sendEmail,
+  sendNoticeEmail,
+  escapeHtml,
   sendAccountApprovedEmail,
   sendAccountRejectedEmail,
   sendPasswordResetEmail,

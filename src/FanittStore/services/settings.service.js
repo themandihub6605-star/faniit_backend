@@ -59,6 +59,7 @@ function publicConfig(settings) {
   return {
     storeFeePercent: settings.storeFeePercent,
     fanboxFeePercent: settings.fanboxFeePercent,
+    requireSubscription: Boolean(settings.requireSubscription),
     termsVersion: settings.termsVersion,
     toolCards: [...settings.toolCards].filter((c) => c.enabled).sort((a, b) => a.order - b.order),
     webBanner: settings.webBanner?.enabled ? settings.webBanner : null,

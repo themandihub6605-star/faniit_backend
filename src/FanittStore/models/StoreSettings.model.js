@@ -33,6 +33,10 @@ const storeSettingsSchema = new mongoose.Schema(
     storeFeePercent: { type: Number, default: DEFAULT_FEES.STORE_FEE_PERCENT, min: 0, max: 50 },
     fanboxFeePercent: { type: Number, default: DEFAULT_FEES.FANBOX_FEE_PERCENT, min: 0, max: 50 },
 
+    // On: a creator needs a paid Fanitt plan (monthly or yearly) to open
+    // a new store. Off: anyone can open one. Existing stores aren't affected.
+    requireSubscription: { type: Boolean, default: false },
+
     termsVersion: { type: String, default: '1.0' },
     termsText: {
       type: String,

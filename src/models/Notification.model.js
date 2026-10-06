@@ -27,6 +27,11 @@ const NOTIFICATION_TYPES = [
   'community_join_request',
   'community_join_approved',
   'community_announcement',
+  // Account / admin decisions
+  'account_update',
+  'withdrawal_update',
+  'dispute_resolved',
+  'subscription_update',
   // Fanitt Store
   'store_order',
   'store_sale',
@@ -35,7 +40,7 @@ const NOTIFICATION_TYPES = [
   'store_call',
 ];
 
-const RELATED_MODELS = ['Post', 'User', 'Session', 'Milestone', 'Dispute', 'Gift', 'Proposal', 'Campaign', 'Collaboration', 'Conversation', 'Community', 'CommunityPost', 'Broadcast', 'Store', 'StoreOrder', 'DigitalProduct', 'LiveStream', 'CallSession'];
+const RELATED_MODELS = ['Post', 'User', 'Session', 'Milestone', 'Dispute', 'Gift', 'Proposal', 'Campaign', 'Collaboration', 'Conversation', 'Community', 'CommunityPost', 'Broadcast', 'Store', 'StoreOrder', 'DigitalProduct', 'LiveStream', 'CallSession', 'Withdrawal', 'AffiliateProduct'];
 
 const notificationSchema = new mongoose.Schema(
   {

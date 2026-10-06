@@ -41,6 +41,16 @@ const userSchema = new mongoose.Schema(
 
     isEmailVerified: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    // Account deletion: 'pending' when the user asks (account locked),
+    // 'approved' once an admin deletes it — the email is then freed so the
+    // same person can sign up again. 'rejected' = admin restored it.
+    deletionStatus: { type: String, enum: ['none', 'pending', 'approved', 'rejected'], default: 'none', index: true },
+    deletionRequestedAt: { type: Date, default: null },
+    deletionReviewedAt: { type: Date, default: null },
+    deletionReason: { type: String, default: '' },
+    deletionNote: { type: String, default: '' },
+    // Original email, kept after approval for the admin record only.
+    deletedEmail: { type: String, default: '', lowercase: true, trim: true },
     // Campaigns a creator bookmarked (was missing, so save/saved crashed).
     savedCampaigns: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Campaign' }],
 

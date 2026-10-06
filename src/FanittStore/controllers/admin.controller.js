@@ -10,7 +10,11 @@ const orderService = require('../services/order.service');
 const liveService = require('../services/live.service');
 const callService = require('../services/call.service');
 const storage = require('../services/storage.service');
-const { safeNotify } = require('../services/notify.service');
+const { alertUser } = require('../../services/alert.service');
+
+// Every admin decision on a creator's store reaches them in-app, by push
+// and by email.
+const safeNotify = (payload) => alertUser({ ...payload, email: payload.email ?? true });
 const { ownerStore, product: serializeProduct, order: serializeOrder } = require('../utils/serialize');
 const { pageParams, escapeRegex } = require('../utils/text');
 const log = require('../utils/logger');
@@ -341,7 +345,7 @@ const getSettings = catchAsync(async (req, res) => {
 /** PATCH /api/store/admin/settings — fees and terms. */
 const updateSettings = catchAsync(async (req, res) => {
   const settings = await settingsService.getSettings({ fresh: true });
-  ['storeFeePercent', 'fanboxFeePercent', 'termsVersion', 'termsText'].forEach((field) => {
+  ['storeFeePercent', 'fanboxFeePercent', 'requireSubscription', 'termsVersion', 'termsText'].forEach((field) => {
     if (req.body[field] !== undefined) settings[field] = req.body[field];
   });
   settings.updatedBy = req.user._id;

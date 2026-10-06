@@ -48,10 +48,24 @@ async function getProfileStatus(user) {
   return null;
 }
 
+/** A deleted-but-not-yet-approved account can't be used or re-registered.
+ * After admin approval its email is renamed, so it no longer matches here. */
+function assertNotPendingDeletion(user) {
+  if (user && user.isActive === false) {
+    throw new ApiError(
+      403,
+      'Your account deletion request is under review. Once it is approved you can sign up again with this email.',
+      [],
+      'ACCOUNT_DELETION_PENDING'
+    );
+  }
+}
+
 const register = catchAsync(async (req, res) => {
   const { name, email, password, phone, role, referralCode } = req.body;
 
   const existing = await User.findOne({ email });
+  assertNotPendingDeletion(existing);
   if (existing) throw ApiError.conflict('An account with this email already exists');
 
   const referrer = referralCode ? await resolveReferrer(referralCode) : null;
@@ -79,7 +93,7 @@ const login = catchAsync(async (req, res) => {
     throw ApiError.unauthorized('Invalid email or password');
   }
   if (user.isSuspended) throw ApiError.forbidden('Your account has been suspended. Contact support.');
-  if (user.isActive === false) throw ApiError.unauthorized('This account has been deleted');
+  assertNotPendingDeletion(user);
 
   user.lastLoginAt = new Date();
   await user.save();
@@ -221,6 +235,7 @@ const googleAuth = catchAsync(async (req, res) => {
   const isNewUser = !user;
 
   if (user) {
+    assertNotPendingDeletion(user);
     if (user.isSuspended) throw ApiError.forbidden('Your account has been suspended. Contact support.');
     if (!user.googleId) {
       user.googleId = uid;

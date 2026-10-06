@@ -26,6 +26,7 @@ router.use('/gifts', require('./gift.routes'));
 router.use('/posts', require('./post.routes'));
 router.use('/wallet', require('./wallet.routes'));
 router.use('/analytics', require('./appAnalytics.routes'));
+router.use('/admin/account-deletions', require('./accountDeletion.routes'));
 router.use('/admin', require('./admin.routes'));
   router.use('/legal', require('./legal.routes'));
 router.use('/home', require('./home.routes'));
