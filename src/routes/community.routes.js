@@ -15,6 +15,9 @@ const communityImages = uploadImage('fanitt/communities').fields([
 const postMedia = uploadMedia('fanitt/community-posts').array('media', 5);
 
 // Platform admin (before '/:slug' so they aren't read as a slug)
+router.get('/admin/settings', protect, authorize(ROLES.ADMIN), c.adminGetSettings);
+router.patch('/admin/settings', protect, authorize(ROLES.ADMIN), c.adminUpdateSettings);
+router.get('/admin/payments', protect, authorize(ROLES.ADMIN), c.adminListPayments);
 router.get('/admin/all', protect, authorize(ROLES.ADMIN), c.adminListCommunities);
 router.patch('/admin/:id', protect, authorize(ROLES.ADMIN), c.adminUpdateCommunity);
 router.delete('/admin/:id', protect, authorize(ROLES.ADMIN), c.deleteCommunity);
@@ -34,10 +37,12 @@ router.post('/comments/:commentId/like', protect, c.toggleCommentLike);
 // Communities
 router.get('/', optionalAuth, c.listCommunities);
 router.get('/me', protect, c.getMyCommunities);
+router.get('/config', protect, c.getConfig);
 router.post('/', protect, communityImages, c.createCommunity);
 router.patch('/:id', protect, communityImages, c.updateCommunity);
 router.delete('/:id', protect, c.deleteCommunity);
 router.post('/:id/join', protect, c.toggleMembership);
+router.post('/:id/checkout', protect, c.checkout);
 router.patch('/:id/me', protect, c.updateMySettings);
 
 // Members

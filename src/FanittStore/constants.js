@@ -50,6 +50,7 @@ const ORDER_ITEM = Object.freeze({
   LIVE_STREAM: 'live_stream', // ticket for a paid live
   CALL: 'call', // prepaid call minutes
   FANBOX: 'fanbox', // a tip — itemId is the creator's CreatorProfile id
+  COMMUNITY: 'community', // paid community plan — itemId is the Community id, context is the plan
 });
 
 // ---------- FanBox ----------

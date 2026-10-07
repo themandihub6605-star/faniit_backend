@@ -6,6 +6,8 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const notificationService = require('../services/notification.service');
 const cs = require('../services/community.service');
+const paid = require('../services/communityPaid.service');
+const CommunitySettings = require('../models/CommunitySettings.model');
 
 const MAX_PINNED = 3;
 
@@ -50,12 +52,23 @@ function serializeCommunity(community, membership) {
   const obj = community.toObject ? community.toObject() : { ...community };
   const active = cs.isActive(membership);
   obj.membership = membership
-    ? { role: membership.role, status: membership.status, notificationsMuted: membership.notificationsMuted }
+    ? {
+        role: membership.role,
+        status: membership.status,
+        notificationsMuted: membership.notificationsMuted,
+        access: membership.access || 'free',
+        plan: membership.plan || null,
+        paidUntil: membership.paidUntil || null,
+      }
     : null;
   obj.canPost = active && (obj.postPermission === 'all' || cs.isModRole(membership.role));
   obj.canModerate = active && cs.isModRole(membership.role);
   obj.isOwner = active && membership.role === 'admin';
+  // Plans buyers can pick (empty for free communities).
+  obj.planOptions = paid.publicPlans(community);
   if (!obj.canModerate) delete obj.pendingRequestCount;
+  // Earnings are for the owner only.
+  if (!obj.isOwner) delete obj.paidStats;
   return obj;
 }
 
@@ -207,6 +220,9 @@ const getCommunity = catchAsync(async (req, res) => {
 });
 
 const createCommunity = catchAsync(async (req, res) => {
+  await paid.assertCanCreate(req.user);
+  const pricing = paid.readPricing(req.body);
+  if (pricing?.isPaid) await paid.assertCanSell(req.user);
   const name = String(req.body.name || '').trim();
   if (name.length < 3) throw ApiError.badRequest('Community name must be at least 3 characters');
   if (name.length > 60) throw ApiError.badRequest('Community name can be up to 60 characters');
@@ -227,6 +243,7 @@ const createCommunity = catchAsync(async (req, res) => {
     coverImageUrl: req.files?.cover?.[0]?.path || '',
     createdBy: req.user._id,
     memberCount: 1,
+    ...(pricing ? { isPaid: pricing.isPaid, plans: pricing.plans, paidSince: pricing.isPaid ? new Date() : null } : {}),
   });
   const membership = await CommunityMembership.create({ community: community._id, user: req.user._id, role: 'admin' });
 
@@ -256,6 +273,8 @@ const updateCommunity = catchAsync(async (req, res) => {
       community.postPermission = b.postPermission;
     }
     if (b.chatEnabled !== undefined) community.chatEnabled = toBool(b.chatEnabled);
+    // Paid / free and plan prices (owner only).
+    await paid.applyPricing(community, paid.readPricing(b), req.user);
     if (b.visibility !== undefined && Community.VISIBILITY.includes(b.visibility) && b.visibility !== community.visibility) {
       community.visibility = b.visibility;
       // Going public lets everyone who was waiting straight in.
@@ -310,6 +329,28 @@ const toggleMembership = catchAsync(async (req, res) => {
     community.pendingRequestCount = Math.max(0, community.pendingRequestCount - 1);
     await community.save();
     return new ApiResponse(200, { joined: false, status: null }, 'Request cancelled').send(res);
+  }
+
+  // Paid community: joining means buying a plan (POST /:id/checkout).
+  if (community.isPaid) {
+    throw new ApiError(
+      402,
+      existing?.status === 'expired' ? 'Your membership ended — renew to get back in' : 'This is a paid community — pick a plan to join',
+      [],
+      'COMMUNITY_PAYMENT_REQUIRED'
+    );
+  }
+
+  // Paid access ran out but the community is free now — straight back in.
+  if (existing?.status === 'expired') {
+    existing.status = 'active';
+    existing.access = 'free';
+    existing.plan = null;
+    existing.paidUntil = null;
+    await existing.save();
+    community.memberCount += 1;
+    await community.save();
+    return new ApiResponse(200, { joined: true, status: 'active' }, 'Joined community').send(res);
   }
 
   if (community.visibility === 'private') {
@@ -858,12 +899,57 @@ const deleteChatMessage = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Message removed').send(res);
 });
 
+// --- paid communities ------------------------------------------------------
+
+/** GET /api/communities/config — what the create / edit screen needs. */
+const getConfig = catchAsync(async (req, res) => {
+  const [settings, sub, isCreator] = await Promise.all([
+    paid.getSettings(),
+    paid.subscriptionOf(req.user),
+    require('../models').CreatorProfile.exists({ user: req.user._id }),
+  ]);
+  let feePercent = 0;
+  try {
+    feePercent = (await require('../FanittStore/services/settings.service').getSettings()).storeFeePercent || 0;
+  } catch {
+    feePercent = 0;
+  }
+  return new ApiResponse(
+    200,
+    {
+      requireSubscription: settings.requireSubscription && req.user.role !== 'admin',
+      hasSubscription: sub.hasSubscription,
+      planName: sub.planName,
+      paidCommunitiesEnabled: settings.paidCommunitiesEnabled,
+      canSell: Boolean(isCreator) || req.user.role === 'admin',
+      feePercent,
+      minPrice: paid.MIN_PRICE,
+      maxPrice: paid.MAX_PRICE,
+    },
+    'Community config'
+  ).send(res);
+});
+
+/** POST /api/communities/:id/checkout { plan: monthly|yearly|lifetime, payWith? } */
+const checkout = catchAsync(async (req, res) => {
+  const community = await cs.findCommunity(req.params.id);
+  const result = await paid.startCheckout(req.user, community, { plan: req.body.plan, payWith: req.body.payWith });
+  const { order: serializeOrder } = require('../FanittStore/utils/serialize');
+  return new ApiResponse(
+    result.paid ? 201 : 200,
+    { order: serializeOrder(result.order), paid: result.paid, razorpay: result.razorpay },
+    result.paid ? 'You’re in! 🎉' : 'Complete the payment'
+  ).send(res);
+});
+
 // --- platform admin --------------------------------------------------------
 
 const adminListCommunities = catchAsync(async (req, res) => {
   const { page, limit, skip } = pageParams(req.query, 30, 100);
   const filter = {};
   if (req.query.search) filter.name = new RegExp(escapeRegex(req.query.search), 'i');
+  if (req.query.type === 'paid') filter.isPaid = true;
+  if (req.query.type === 'free') filter.isPaid = { $ne: true };
   const [communities, total] = await Promise.all([
     Community.find(filter)
       .populate('createdBy', 'name email avatarUrl')
@@ -873,7 +959,14 @@ const adminListCommunities = catchAsync(async (req, res) => {
       .limit(limit),
     Community.countDocuments(filter),
   ]);
-  return new ApiResponse(200, { communities, total, page, pages: Math.ceil(total / limit) }, 'Communities fetched').send(res);
+  // Active paid members per community on this page.
+  const paidCounts = await CommunityMembership.aggregate([
+    { $match: { community: { $in: communities.map((c) => c._id) }, status: 'active', access: 'paid' } },
+    { $group: { _id: '$community', count: { $sum: 1 } } },
+  ]);
+  const paidMap = new Map(paidCounts.map((p) => [String(p._id), p.count]));
+  const rows = communities.map((c) => ({ ...c.toObject(), paidMemberCount: paidMap.get(String(c._id)) || 0 }));
+  return new ApiResponse(200, { communities: rows, total, page, pages: Math.ceil(total / limit) }, 'Communities fetched').send(res);
 });
 
 const adminUpdateCommunity = catchAsync(async (req, res) => {
@@ -881,11 +974,98 @@ const adminUpdateCommunity = catchAsync(async (req, res) => {
   if (!community) throw ApiError.notFound('Community not found');
   if (req.body.isVerified !== undefined) community.isVerified = toBool(req.body.isVerified);
   if (req.body.isFeatured !== undefined) community.isFeatured = toBool(req.body.isFeatured);
+  // Admin can switch a paid community back to free (members keep access).
+  if (req.body.isPaid !== undefined && !toBool(req.body.isPaid)) community.isPaid = false;
   await community.save();
   return new ApiResponse(200, community, 'Community updated').send(res);
 });
 
+/** GET/PATCH /api/communities/admin/settings */
+const adminGetSettings = catchAsync(async (req, res) => {
+  const s = await CommunitySettings.get();
+  return new ApiResponse(200, { requireSubscription: s.requireSubscription, paidCommunitiesEnabled: s.paidCommunitiesEnabled }, 'Community settings').send(res);
+});
+
+const adminUpdateSettings = catchAsync(async (req, res) => {
+  const s = await CommunitySettings.get();
+  if (req.body.requireSubscription !== undefined) s.requireSubscription = toBool(req.body.requireSubscription);
+  if (req.body.paidCommunitiesEnabled !== undefined) s.paidCommunitiesEnabled = toBool(req.body.paidCommunitiesEnabled);
+  await s.save();
+  return new ApiResponse(200, { requireSubscription: s.requireSubscription, paidCommunitiesEnabled: s.paidCommunitiesEnabled }, 'Settings saved').send(res);
+});
+
+/** GET /api/communities/admin/payments?community=&status=&search=&page= — every paid-community payment. */
+const adminListPayments = catchAsync(async (req, res) => {
+  const { StoreOrder } = require('../FanittStore/models');
+  const { page, limit, skip } = pageParams(req.query, 30, 100);
+  const filter = { itemType: 'community', status: { $in: ['paid', 'refunded'] } };
+  if (req.query.status === 'paid' || req.query.status === 'refunded') filter.status = req.query.status;
+  if (req.query.community && /^[a-f\d]{24}$/i.test(req.query.community)) filter.itemId = req.query.community;
+  if (req.query.search) {
+    const pattern = new RegExp(escapeRegex(req.query.search), 'i');
+    const users = await User.find({ $or: [{ name: pattern }, { email: pattern }] }).select('_id').limit(300);
+    filter.$or = [{ itemTitle: pattern }, { buyer: { $in: users.map((u) => u._id) } }];
+  }
+  const [orders, total, sums] = await Promise.all([
+    StoreOrder.find(filter).populate('buyer', 'name email avatarUrl').populate('seller', 'name email').sort({ paidAt: -1, createdAt: -1 }).skip(skip).limit(limit),
+    StoreOrder.countDocuments(filter),
+    StoreOrder.aggregate([
+      { $match: { itemType: 'community', status: 'paid' } },
+      { $group: { _id: null, gross: { $sum: '$amount' }, fees: { $sum: '$feeAmount' }, net: { $sum: '$creatorEarning' }, count: { $sum: 1 } } },
+    ]),
+  ]);
+  // Current access of each buyer.
+  const memberships = orders.length
+    ? await CommunityMembership.find({
+        $or: orders.map((o) => ({ community: o.itemId, user: o.buyer?._id || o.buyer })),
+      }).select('community user status plan paidUntil')
+    : [];
+  const key = (c, u) => `${c}:${u}`;
+  const mMap = new Map(memberships.map((m) => [key(m.community, m.user), m]));
+  const payments = orders.map((o) => {
+    const m = mMap.get(key(o.itemId, o.buyer?._id || o.buyer));
+    return {
+      _id: o._id,
+      communityId: o.itemId,
+      title: o.itemTitle,
+      plan: o.context,
+      amount: o.amount,
+      feeAmount: o.feeAmount,
+      creatorEarning: o.creatorEarning,
+      paidWith: o.paidWith,
+      status: o.status,
+      invoiceNumber: o.invoiceNumber,
+      paidAt: o.paidAt,
+      refundedAt: o.refundedAt,
+      buyer: o.buyer,
+      owner: o.seller,
+      access: m ? { status: m.status, plan: m.plan, paidUntil: m.paidUntil } : null,
+    };
+  });
+  const totals = sums[0] || { gross: 0, fees: 0, net: 0, count: 0 };
+  const [paidCommunities, activePaidMembers] = await Promise.all([
+    Community.countDocuments({ isPaid: true }),
+    CommunityMembership.countDocuments({ status: 'active', access: 'paid' }),
+  ]);
+  return new ApiResponse(
+    200,
+    {
+      payments,
+      total,
+      page,
+      pages: Math.ceil(total / limit) || 1,
+      totals: { gross: totals.gross, fees: totals.fees, net: totals.net, payments: totals.count, paidCommunities, activePaidMembers },
+    },
+    'Community payments'
+  ).send(res);
+});
+
 module.exports = {
+  getConfig,
+  checkout,
+  adminGetSettings,
+  adminUpdateSettings,
+  adminListPayments,
   listCommunities,
   getMyCommunities,
   getCommunity,

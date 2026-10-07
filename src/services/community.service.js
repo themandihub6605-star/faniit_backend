@@ -8,10 +8,18 @@ function isModRole(role) {
   return MOD_ROLES.includes(role);
 }
 
-/** Active membership of a user in a community, or null. */
+/** Membership of a user in a community, or null. A paid membership whose
+ * time ran out is switched to `expired` here, so every access check below
+ * sees the right status. */
 async function getMembership(communityId, userId) {
   if (!userId) return null;
-  return CommunityMembership.findOne({ community: communityId, user: userId });
+  const membership = await CommunityMembership.findOne({ community: communityId, user: userId });
+  if (membership) {
+    // Lazy — communityPaid.service requires this file's models too.
+    const paid = require('./communityPaid.service');
+    if (paid.isExpired(membership)) await paid.expireMembership(membership);
+  }
+  return membership;
 }
 
 async function findCommunity(idOrSlug) {
@@ -25,14 +33,22 @@ function isActive(membership) {
   return Boolean(membership && membership.status === 'active');
 }
 
-/** Public communities are readable by anyone; private ones by active members. */
+/** Public free communities are readable by anyone; private and paid ones by active members. */
 function canView(community, membership) {
-  return community.visibility === 'public' || isActive(membership);
+  return (community.visibility === 'public' && !community.isPaid) || isActive(membership);
 }
 
 function assertCanView(community, membership) {
   if (isActive(membership)) return;
   if (membership?.status === 'banned') throw ApiError.forbidden('You have been removed from this community');
+  if (community.isPaid) {
+    throw new ApiError(
+      402,
+      membership?.status === 'expired' ? 'Your membership ended — renew to see the posts' : 'This is a paid community — pick a plan to see the posts',
+      [],
+      'COMMUNITY_PAYMENT_REQUIRED'
+    );
+  }
   if (community.visibility !== 'public') {
     throw ApiError.forbidden('This community is private — join to see its posts', [], 'COMMUNITY_PRIVATE');
   }
@@ -40,6 +56,7 @@ function assertCanView(community, membership) {
 
 function assertMember(membership) {
   if (membership?.status === 'banned') throw ApiError.forbidden('You have been removed from this community');
+  if (membership?.status === 'expired') throw new ApiError(402, 'Your membership ended — renew to take part', [], 'COMMUNITY_PAYMENT_REQUIRED');
   if (!isActive(membership)) throw ApiError.forbidden('Join this community to take part', [], 'COMMUNITY_JOIN_REQUIRED');
 }
 

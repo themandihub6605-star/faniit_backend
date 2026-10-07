@@ -7,6 +7,8 @@ const registerSchema = z.object({
   password: z.string().min(8, 'Password must be at least 8 characters'),
   phone: z.string().optional(),
   role: z.enum([ROLES.FAN, ROLES.CREATOR, ROLES.BRAND, ROLES.AGENCY]).default(ROLES.FAN),
+  // 6-digit code sent by POST /auth/register/send-otp.
+  otp: z.string({ required_error: 'Enter the 6-digit code sent to your email' }).trim().regex(/^\d{6}$/, 'Enter the 6-digit code sent to your email'),
   // Optional. When given it must be exactly 8 characters: 2 letters + 6 letters/digits (e.g. CRK7F3QX).
   referralCode: z.preprocess(
     (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
@@ -17,6 +19,11 @@ const registerSchema = z.object({
       .transform((v) => v.toUpperCase())
       .optional()
   ),
+});
+
+const sendSignupOtpSchema = z.object({
+  email: z.string().trim().email('Invalid email address'),
+  name: z.string().trim().max(80).optional(),
 });
 
 const loginSchema = z.object({
@@ -33,4 +40,4 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
-module.exports = { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema };
+module.exports = { registerSchema, sendSignupOtpSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema };

@@ -1,5 +1,6 @@
 module.exports = {
   User: require('./User.model'),
+  PendingSignup: require('./PendingSignup.model'),
   CreatorProfile: require('./CreatorProfile.model'),
   BrandProfile: require('./BrandProfile.model'),
   AgencyProfile: require('./AgencyProfile.model'),

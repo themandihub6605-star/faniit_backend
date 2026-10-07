@@ -3,6 +3,7 @@ const router = express.Router();
 
 const {
   register,
+  sendSignupOtp,
   login,
   refresh,
   logout,
@@ -16,8 +17,9 @@ const {
 const { protect } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
 const { authLimiter } = require('../middlewares/rateLimiter.middleware');
-const { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
+const { registerSchema, sendSignupOtpSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
 
+router.post('/register/send-otp', authLimiter, validate(sendSignupOtpSchema), sendSignupOtp);
 router.post('/register', authLimiter, validate(registerSchema), register);
 router.post('/login', authLimiter, validate(loginSchema), login);
 router.post('/google', authLimiter, googleAuth);

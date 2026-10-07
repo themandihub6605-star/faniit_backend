@@ -21,6 +21,9 @@ router.put('/home-layout', homeLayout.saveLayout);
 router.get('/home-layout/search', homeLayout.searchItems);
 
 router.get('/users', admin.listUsers);
+router.get('/users/stats', admin.getUserStats);
+router.post('/users/request-profile-update', admin.requestProfileUpdateBulk);
+router.post('/users/:id/request-profile-update', admin.requestProfileUpdate);
 router.get('/users/:id', admin.getUserDetail);
 router.patch('/users/:id/suspend', admin.suspendUser);
 router.patch('/users/:id/reinstate', admin.reinstateUser);

@@ -21,6 +21,7 @@ const escrowService = require('../services/escrow.service');
 const subscriptionService = require('../services/subscription.service');
 const { sendAccountApprovedEmail, sendAccountRejectedEmail, sendWithdrawalCompletedEmail, sendWithdrawalRejectedEmail } = require('../services/email.service');
 const { alertUser } = require('../services/alert.service');
+const profileCheck = require('../services/profileCompleteness.service');
 const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
@@ -36,16 +37,172 @@ function rupees(paise) {
 
 // ---------- Users ----------
 
+const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Midnight today in India (IST), as a UTC Date. */
+function startOfTodayIST() {
+  const IST = 5.5 * 60 * 60 * 1000;
+  const now = new Date(Date.now() + IST);
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - IST);
+}
+
+const DAY = 24 * 60 * 60 * 1000;
+
+/** GET /api/admin/users
+ *  ?role= &search= (name, email or phone)
+ *  &profile= incomplete | unverified | pending | rejected | verified
+ *  &joined= today | 7d | 30d
+ *  &provider= google | local
+ *  Each row also carries `profileSummary` (status, missing fields, %). */
 const listUsers = catchAsync(async (req, res) => {
-  const { role, search, page = 1, limit = 30 } = req.query;
+  const { role, search, profile, joined, provider } = req.query;
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+
   const filter = {};
   if (role) filter.role = role;
-  if (search) filter.$or = [{ name: new RegExp(search, 'i') }, { email: new RegExp(search, 'i') }];
+  if (provider === 'google' || provider === 'local') filter.authProvider = provider === 'local' ? { $ne: 'google' } : 'google';
+  if (search && String(search).trim()) {
+    const rx = new RegExp(escapeRegex(String(search).trim()), 'i');
+    filter.$or = [{ name: rx }, { email: rx }, { phone: rx }];
+  }
+  if (joined === 'today') filter.createdAt = { $gte: startOfTodayIST() };
+  else if (joined === '7d') filter.createdAt = { $gte: new Date(Date.now() - 7 * DAY) };
+  else if (joined === '30d') filter.createdAt = { $gte: new Date(Date.now() - 30 * DAY) };
 
-  const users = await User.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(Number(limit));
-  const total = await User.countDocuments(filter);
+  if (profile) {
+    const ids =
+      profile === 'incomplete'
+        ? await profileCheck.incompleteUserIds(role)
+        : Object.values(VERIFICATION_STATUS).includes(profile)
+          ? await profileCheck.userIdsWithStatus(profile, role)
+          : null;
+    if (ids) filter._id = { $in: ids };
+  }
 
-  return new ApiResponse(200, { users, total, page: Number(page), pages: Math.ceil(total / limit) }, 'Users fetched').send(res);
+  const [users, total] = await Promise.all([
+    User.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
+    User.countDocuments(filter),
+  ]);
+  const summaries = await profileCheck.summarize(users);
+  const rows = users.map((u) => ({ ...u.toObject(), profileSummary: summaries[String(u._id)] ?? null }));
+
+  return new ApiResponse(200, { users: rows, total, page, pages: Math.max(1, Math.ceil(total / limit)) }, 'Users fetched').send(res);
+});
+
+/** GET /api/admin/users/stats — numbers for the cards on the Users page. */
+const getUserStats = catchAsync(async (req, res) => {
+  const today = startOfTodayIST();
+  const week = new Date(Date.now() - 7 * DAY);
+  const month = new Date(Date.now() - 30 * DAY);
+
+  const [total, newToday, new7d, new30d, activeToday, suspended, google, byRoleRows, incompleteIds, pending, changesRequested, unverified] =
+    await Promise.all([
+      User.countDocuments({}),
+      User.countDocuments({ createdAt: { $gte: today } }),
+      User.countDocuments({ createdAt: { $gte: week } }),
+      User.countDocuments({ createdAt: { $gte: month } }),
+      User.countDocuments({ lastLoginAt: { $gte: today } }),
+      User.countDocuments({ isSuspended: true }),
+      User.countDocuments({ authProvider: 'google' }),
+      User.aggregate([{ $group: { _id: '$role', count: { $sum: 1 } } }]),
+      profileCheck.incompleteUserIds(),
+      profileCheck.userIdsWithStatus(VERIFICATION_STATUS.PENDING),
+      profileCheck.userIdsWithStatus(VERIFICATION_STATUS.REJECTED),
+      profileCheck.userIdsWithStatus(VERIFICATION_STATUS.UNVERIFIED),
+    ]);
+
+  const byRole = Object.fromEntries(byRoleRows.map((r) => [r._id || 'unknown', r.count]));
+  return new ApiResponse(
+    200,
+    {
+      total,
+      newToday,
+      new7d,
+      new30d,
+      activeToday,
+      suspended,
+      google,
+      email: total - google,
+      byRole,
+      incompleteProfiles: incompleteIds.length,
+      pendingReview: pending.length,
+      changesRequested: changesRequested.length,
+      notSubmitted: unverified.length,
+    },
+    'User stats'
+  ).send(res);
+});
+
+/** Locks one creator / brand / agency into "update your profile" — the app
+ * shows the changes screen with the note until they resubmit and an admin
+ * approves again. Returns false when the user has no reviewed profile. */
+async function askToUpdate(user, note, adminId) {
+  if (!profileCheck.hasReviewedProfile(user.role)) return false;
+  const Model = profileCheck.PROFILE_MODEL[user.role];
+  let profile = await Model.findOne({ user: user._id });
+  if (!profile) return false;
+
+  const missing = profileCheck.missingFields(user, profile.toObject());
+  const reason =
+    (note && String(note).trim()) ||
+    (missing.length ? `Please complete your profile: ${missing.join(', ')}.` : 'Please review your profile details and submit them again.');
+
+  profile.verificationStatus = VERIFICATION_STATUS.REJECTED;
+  profile.rejectionReason = reason.slice(0, 500);
+  await profile.save({ validateBeforeSave: false });
+
+  alertUser({
+    userId: user._id,
+    fromUser: adminId,
+    type: 'account_update',
+    title: 'Please update your profile',
+    message: `${reason} Open Fanitt, update your details and submit them for review.`,
+    relatedModel: 'User',
+    relatedId: user._id,
+    email: {
+      to: user.email,
+      name: user.name,
+      subject: 'Action needed: update your Fanitt profile',
+      heading: 'Please update your profile',
+      body: 'To keep your account active, please update your profile details in the Fanitt app and submit them for review.',
+      reason,
+      reasonLabel: 'What to update',
+      ctaLabel: 'Update my profile',
+      tone: 'info',
+    },
+  });
+  return true;
+}
+
+/** POST /api/admin/users/:id/request-profile-update  { note? } */
+const requestProfileUpdate = catchAsync(async (req, res) => {
+  const user = await User.findById(req.params.id);
+  if (!user) throw ApiError.notFound('User not found');
+  if (!profileCheck.hasReviewedProfile(user.role)) throw ApiError.badRequest('Only creators, brands and agencies have a profile to update.');
+  const ok = await askToUpdate(user, req.body?.note, req.user._id);
+  if (!ok) throw ApiError.badRequest('This user has not set up a profile yet.');
+  const summaries = await profileCheck.summarize([user]);
+  return new ApiResponse(200, { ...user.toObject(), profileSummary: summaries[String(user._id)] }, 'User asked to update their profile').send(res);
+});
+
+/** POST /api/admin/users/request-profile-update
+ *  { userIds: [...], note? }  or  { allIncomplete: true, role?, note? } */
+const requestProfileUpdateBulk = catchAsync(async (req, res) => {
+  const { userIds, allIncomplete, role, note } = req.body || {};
+  let ids = [];
+  if (allIncomplete) ids = await profileCheck.incompleteUserIds(role || undefined);
+  else if (Array.isArray(userIds)) ids = userIds.map(String);
+  if (!ids.length) throw ApiError.badRequest('No users selected.');
+  if (ids.length > 2000) throw ApiError.badRequest('Too many users at once — narrow it down to 2,000 or fewer.');
+
+  const users = await User.find({ _id: { $in: ids }, role: { $in: Object.keys(profileCheck.PROFILE_MODEL) } });
+  let updated = 0;
+  for (const user of users) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await askToUpdate(user, note, req.user._id)) updated += 1;
+  }
+  return new ApiResponse(200, { requested: ids.length, updated, skipped: ids.length - updated }, `${updated} user${updated === 1 ? '' : 's'} asked to update their profile`).send(res);
 });
 
 /** GET /api/admin/users/:id — everything about one user in one call: their
@@ -842,6 +999,9 @@ const setUserSubscription = catchAsync(async (req, res) => {
 
 module.exports = {
   listUsers,
+  getUserStats,
+  requestProfileUpdate,
+  requestProfileUpdateBulk,
   getUserDetail,
   suspendUser,
   reinstateUser,

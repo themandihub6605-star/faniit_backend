@@ -17,6 +17,8 @@ async function tick() {
   running = true;
   try {
     await callService.runTimeouts();
+    // Paid communities: expire ended memberships, send renew reminders.
+    await require('../../services/communityPaid.service').runSweep();
     const stale = await LiveStream.find({ status: LIVE_STATUS.LIVE, startedAt: { $lt: new Date(Date.now() - LIVE_MAX_MS) } }).limit(20);
     for (const live of stale) {
       // eslint-disable-next-line no-await-in-loop

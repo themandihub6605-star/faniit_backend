@@ -91,6 +91,12 @@ async function afterPaid(order) {
 
   await earningsService.creditSale(order._id, { feePercent: settings.storeFeePercent });
 
+  if (order.itemType === ORDER_ITEM.COMMUNITY) {
+    // Gives / extends the membership and tells the buyer and the owner.
+    await require('../../services/communityPaid.service').grantFromOrder(order);
+    return;
+  }
+
   const text = NOTIFY_TEXT[order.itemType];
   await Promise.all([
     safeNotify({
@@ -322,6 +328,9 @@ async function refundOrder(orderId, { byUserId, reason }) {
     await earningsService.refundToWallet(updated, updated.amount, reason);
   }
   if (updated.creditedAt) await earningsService.reverseSale(updated, { byUserId, reason });
+  if (updated.itemType === ORDER_ITEM.COMMUNITY) {
+    await require('../../services/communityPaid.service').revokeFromOrder(updated);
+  }
 
   const toWallet = updated.paidWith === PAY_WITH.WALLET;
   await Promise.all([

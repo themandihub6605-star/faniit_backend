@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { User, CreatorProfile, BrandProfile, AgencyProfile } = require('../models');
+const { User, PendingSignup, CreatorProfile, BrandProfile, AgencyProfile } = require('../models');
 const { generateAccessToken, generateRefreshToken, verifyRefreshToken } = require('../utils/generateToken');
 const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
@@ -7,7 +7,7 @@ const ApiError = require('../utils/apiError');
 const ApiResponse = require('../utils/apiResponse');
 const { ROLES } = require('../constants/enums');
 const { resolveReferrer } = require('../services/referral.service');
-const { sendPasswordResetEmail } = require('../services/email.service');
+const { sendPasswordResetEmail, sendSignupOtpEmail } = require('../services/email.service');
 
 // Agency profiles reuse their owner's 8-character user referral code
 // (AGxxxxxx) — one code per agency, see utils/generateReferralCode.js.
@@ -61,16 +61,111 @@ function assertNotPendingDeletion(user) {
   }
 }
 
+// ---------- Email code for sign-up ----------
+
+const OTP_TTL_MS = 10 * 60 * 1000; // code works for 10 minutes
+const OTP_RESEND_MS = 60 * 1000; // one code per minute
+const OTP_MAX_PER_HOUR = 5; // codes per email per hour
+const OTP_MAX_ATTEMPTS = 5; // wrong tries before a new code is needed
+
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
+function hashOtp(email, otp) {
+  return crypto
+    .createHmac('sha256', process.env.JWT_SECRET || 'fanitt-signup-otp')
+    .update(`${email}:${otp}`)
+    .digest('hex');
+}
+
+/** POST /api/auth/register/send-otp — emails a 6-digit code. No account is
+ * created here; POST /register creates it once the code is confirmed. */
+const sendSignupOtp = catchAsync(async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const name = (req.body.name || '').trim();
+
+  const existing = await User.findOne({ email });
+  assertNotPendingDeletion(existing);
+  if (existing) throw ApiError.conflict('An account with this email already exists. Log in instead.');
+
+  const now = Date.now();
+  let pending = await PendingSignup.findOne({ email });
+
+  if (pending) {
+    const wait = pending.lastSentAt.getTime() + OTP_RESEND_MS - now;
+    if (wait > 0) {
+      const seconds = Math.ceil(wait / 1000);
+      throw new ApiError(429, `Please wait ${seconds}s before asking for a new code.`, [], 'OTP_RESEND_WAIT');
+    }
+    if (now - pending.windowStart.getTime() > 60 * 60 * 1000) {
+      pending.windowStart = new Date(now);
+      pending.sentInWindow = 0;
+    }
+    if (pending.sentInWindow >= OTP_MAX_PER_HOUR) {
+      throw new ApiError(429, 'Too many codes sent to this email. Please try again in an hour.', [], 'OTP_LIMIT');
+    }
+  } else {
+    pending = new PendingSignup({ email, windowStart: new Date(now), sentInWindow: 0 });
+  }
+
+  const otp = String(crypto.randomInt(100000, 1000000));
+  pending.otpHash = hashOtp(email, otp);
+  pending.expiresAt = new Date(now + OTP_TTL_MS);
+  pending.attempts = 0;
+  pending.lastSentAt = new Date(now);
+  pending.sentInWindow += 1;
+  pending.purgeAt = new Date(now + 60 * 60 * 1000);
+  await pending.save();
+
+  const sent = await sendSignupOtpEmail({ to: email, name, otp });
+  if (!sent) {
+    // Let them try again right away — nothing reached their inbox.
+    pending.lastSentAt = new Date(0);
+    pending.sentInWindow = Math.max(0, pending.sentInWindow - 1);
+    await pending.save();
+    throw new ApiError(503, 'We could not send the code right now. Please try again in a moment.', [], 'OTP_SEND_FAILED');
+  }
+
+  return new ApiResponse(200, { email, expiresInSeconds: OTP_TTL_MS / 1000, resendInSeconds: OTP_RESEND_MS / 1000 }, `We sent a 6-digit code to ${email}`).send(res);
+});
+
+/** Checks the sign-up code; throws a clear error when it is wrong or old. */
+async function consumeSignupOtp(email, otp) {
+  const pending = await PendingSignup.findOne({ email });
+  if (!pending || pending.expiresAt.getTime() < Date.now()) {
+    throw ApiError.badRequest('This code has expired. Tap "Resend code" to get a new one.', 'OTP_EXPIRED');
+  }
+  if (pending.attempts >= OTP_MAX_ATTEMPTS) {
+    throw new ApiError(429, 'Too many wrong tries. Tap "Resend code" to get a new one.', [], 'OTP_TOO_MANY_TRIES');
+  }
+  const expected = Buffer.from(pending.otpHash, 'hex');
+  const given = Buffer.from(hashOtp(email, otp), 'hex');
+  if (expected.length !== given.length || !crypto.timingSafeEqual(expected, given)) {
+    pending.attempts += 1;
+    await pending.save();
+    const left = OTP_MAX_ATTEMPTS - pending.attempts;
+    throw ApiError.badRequest(
+      left > 0 ? `Wrong code. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Wrong code. Tap "Resend code" to get a new one.',
+      'OTP_INVALID'
+    );
+  }
+  return pending;
+}
+
 const register = catchAsync(async (req, res) => {
-  const { name, email, password, phone, role, referralCode } = req.body;
+  const { name, password, phone, role, referralCode, otp } = req.body;
+  const email = normalizeEmail(req.body.email);
 
   const existing = await User.findOne({ email });
   assertNotPendingDeletion(existing);
   if (existing) throw ApiError.conflict('An account with this email already exists');
 
+  // The email must be confirmed with the code before an account exists.
+  const pending = await consumeSignupOtp(email, otp);
+
   const referrer = referralCode ? await resolveReferrer(referralCode) : null;
 
-  const user = await User.create({ name, email, password, phone, role, roles: [role], referredBy: referrer?._id || null });
+  const user = await User.create({ name, email, password, phone, role, roles: [role], referredBy: referrer?._id || null, isEmailVerified: true });
+  await PendingSignup.deleteOne({ _id: pending._id });
 
   if (role === ROLES.CREATOR) {
     await CreatorProfile.create({ user: user._id, slug: generateSlug(name) });
@@ -241,6 +336,8 @@ const googleAuth = catchAsync(async (req, res) => {
       user.googleId = uid;
       if (!user.avatarUrl && picture) user.avatarUrl = picture;
     }
+    // Google has already confirmed this email.
+    if (!user.isEmailVerified) user.isEmailVerified = true;
     user.lastLoginAt = new Date();
     await user.save();
   } else {
@@ -256,6 +353,7 @@ const googleAuth = catchAsync(async (req, res) => {
       avatarUrl: picture || '',
       authProvider: 'google',
       googleId: uid,
+      isEmailVerified: true,
       role,
       roles: [role],
       referredBy: referrer?._id || null,
@@ -276,4 +374,4 @@ const googleAuth = catchAsync(async (req, res) => {
   return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, refreshToken, isNewUser, profileStatus }, 'Signed in with Google').send(res);
 });
 
-module.exports = { register, login, refresh, logout, getMe, forgotPassword, resetPassword, googleAuth, upgradeRole, completeOnboarding };
+module.exports = { register, sendSignupOtp, login, refresh, logout, getMe, forgotPassword, resetPassword, googleAuth, upgradeRole, completeOnboarding };

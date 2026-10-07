@@ -45,7 +45,7 @@ function ctaButton(href, label) {
  * (e.g. an admin approving a creator must succeed even if the
  * notification email fails to send). */
 async function sendEmail({ to, subject, html, text }) {
-  if (!to) return; // no address to send to — silently skip rather than error
+  if (!to) return false; // no address to send to — silently skip rather than error
   try {
     await transporter.sendMail({
       from: `"${FROM_NAME}" <${FROM_ADDRESS}>`,
@@ -54,8 +54,10 @@ async function sendEmail({ to, subject, html, text }) {
       html,
       text: text || html.replace(/<[^>]+>/g, ''), // plain-text fallback for clients that don't render HTML
     });
+    return true;
   } catch (err) {
     console.error('[email.service] Failed to send email:', { to, subject, error: err.message });
+    return false;
   }
 }
 
@@ -144,6 +146,25 @@ async function sendPasswordResetEmail({ to, name, resetLink }) {
       ${ctaButton(resetLink, 'Reset my password')}
       <p style="margin-top: 20px; font-size: 13px; color: #666;">If you didn't request this, you can safely ignore this email — your password won't be changed.</p>
     `),
+  });
+}
+
+// ---------- Sign-up email code ----------
+
+/** Returns true when the mail was handed to ZeptoMail, so sign-up can tell
+ * the user if the code could not be sent. */
+async function sendSignupOtpEmail({ to, name, otp }) {
+  return sendEmail({
+    to,
+    subject: `${otp} is your Fanitt verification code`,
+    html: wrapEmail(`
+      <h2>Hi ${escapeHtml(name) || 'there'},</h2>
+      <p>Use this code to verify your email and create your Fanitt account:</p>
+      <div style="margin: 20px 0; padding: 16px; text-align: center; background: #FFF1F4; border-radius: 12px; font-size: 32px; font-weight: bold; letter-spacing: 10px; color: #F9436E;">${otp}</div>
+      <p>This code expires in 10 minutes. Do not share it with anyone — Fanitt will never ask you for it.</p>
+      <p style="margin-top: 20px; font-size: 13px; color: #666;">If you didn't try to sign up, you can safely ignore this email.</p>
+    `),
+    text: `Your Fanitt verification code is ${otp}. It expires in 10 minutes. If you didn't try to sign up, ignore this email.`,
   });
 }
 
@@ -321,6 +342,7 @@ module.exports = {
   sendAccountApprovedEmail,
   sendAccountRejectedEmail,
   sendPasswordResetEmail,
+  sendSignupOtpEmail,
   sendWithdrawalCompletedEmail,
   sendWithdrawalRejectedEmail,
   sendMilestoneFundedEmail,
