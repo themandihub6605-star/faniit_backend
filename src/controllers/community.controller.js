@@ -10,6 +10,77 @@ const paid = require('../services/communityPaid.service');
 const CommunitySettings = require('../models/CommunitySettings.model');
 
 const MAX_PINNED = 3;
+/** Free preview posts allowed in one paid community. */
+const MAX_FREE_POSTS = 3;
+/** Locked "members only" teasers shown under the free posts. */
+const LOCKED_TEASERS = 2;
+const TEASER_TEXT = 120;
+
+/** Cloudflare Stream playback URL → its thumbnail picture. */
+function streamThumbnail(url) {
+  const m = /^(https:\/\/[^/]+\/[a-f0-9]{32})\//i.exec(url || '');
+  return m ? `${m[1]}/thumbnails/thumbnail.jpg?width=120` : null;
+}
+
+/** A tiny, heavily blurred copy of the post's first picture, as a data URI.
+ * Only this ever reaches a viewer without a plan — never the real file. */
+async function makeTeaserImage(post) {
+  const first = (post.mediaItems || [])[0];
+  if (!first) return '';
+  const src = first.type === 'video' ? streamThumbnail(first.url) : first.url;
+  if (!src) return '';
+  try {
+    const sharp = require('sharp');
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(src, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!res.ok) return '';
+    const input = Buffer.from(await res.arrayBuffer());
+    const out = await sharp(input).rotate().resize(48, 48, { fit: 'cover' }).blur(3).jpeg({ quality: 45 }).toBuffer();
+    return `data:image/jpeg;base64,${out.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+/** Locked preview of a paid post: who, when, the first line, a blurred
+ * picture and the counts — never the full text or the media links. */
+async function lockedTeasers(communityId) {
+  const posts = await CommunityPost.find({ community: communityId, isFree: { $ne: true } })
+    .select('+teaserImage')
+    .populate('author', cs.AUTHOR_FIELDS)
+    .sort({ createdAt: -1 })
+    .limit(LOCKED_TEASERS);
+  return Promise.all(
+    posts.map(async (post) => {
+      if (post.teaserImage == null) {
+        const image = await makeTeaserImage(post);
+        await CommunityPost.updateOne({ _id: post._id }, { teaserImage: image });
+        post.teaserImage = image;
+      }
+      const text = post.text || post.poll?.question || '';
+      return {
+        _id: post._id,
+        community: post.community,
+        author: post.author,
+        createdAt: post.createdAt,
+        isLocked: true,
+        isAnnouncement: post.isAnnouncement,
+        text: text.length > TEASER_TEXT ? `${text.slice(0, TEASER_TEXT).trim()}…` : text,
+        mediaItems: [],
+        mediaCount: (post.mediaItems || []).length,
+        hasVideo: (post.mediaItems || []).some((m) => m.type === 'video'),
+        hasPoll: Boolean(post.poll?.options?.length),
+        teaserImage: post.teaserImage || '',
+        likeCount: post.likeCount,
+        commentCount: post.commentCount,
+        isLiked: false,
+        poll: null,
+      };
+    })
+  );
+}
 
 // --- helpers -------------------------------------------------------------
 
@@ -522,6 +593,32 @@ const manageMember = catchAsync(async (req, res) => {
 const listPosts = catchAsync(async (req, res) => {
   const community = await cs.findCommunity(req.params.id);
   const membership = await cs.getMembership(community._id, req.user?._id);
+
+  // Paid community, not a member: only the free posts, plus how many are locked.
+  if (cs.isPreviewOnly(community, membership)) {
+    const [free, total, locked] = await Promise.all([
+      CommunityPost.find({ community: community._id, isFree: true }).populate('author', cs.AUTHOR_FIELDS).sort({ createdAt: -1 }).limit(MAX_FREE_POSTS),
+      CommunityPost.countDocuments({ community: community._id }),
+      lockedTeasers(community._id),
+    ]);
+    return new ApiResponse(
+      200,
+      {
+        posts: await serializePosts(free, req.user?._id),
+        // Up to 2 newest paid posts as locked previews (no full text, no media links).
+        locked,
+        total: free.length,
+        page: 1,
+        pages: 1,
+        preview: true,
+        // Paid posts not shown at all (beyond the locked previews).
+        lockedCount: Math.max(0, total - free.length - locked.length),
+        freeCount: free.length,
+      },
+      'Free posts fetched'
+    ).send(res);
+  }
+
   cs.assertCanView(community, membership);
 
   const { page, limit, skip } = pageParams(req.query, 15, 30);
@@ -529,14 +626,15 @@ const listPosts = catchAsync(async (req, res) => {
   const filter = { community: community._id };
   if (req.query.announcements === 'true') filter.isAnnouncement = true;
 
-  const [posts, total] = await Promise.all([
+  const [posts, total, freeCount] = await Promise.all([
     CommunityPost.find(filter).populate('author', cs.AUTHOR_FIELDS).sort(sortBy).skip(skip).limit(limit),
     CommunityPost.countDocuments(filter),
+    community.isPaid ? CommunityPost.countDocuments({ community: community._id, isFree: true }) : 0,
   ]);
 
   return new ApiResponse(
     200,
-    { posts: await serializePosts(posts, req.user?._id), total, page, pages: Math.ceil(total / limit) },
+    { posts: await serializePosts(posts, req.user?._id), total, page, pages: Math.ceil(total / limit), preview: false, lockedCount: 0, freeCount },
     'Posts fetched'
   ).send(res);
 });
@@ -569,6 +667,15 @@ function parsePoll(raw) {
   };
 }
 
+async function assertFreeSlot(communityId, exceptPostId = null) {
+  const filter = { community: communityId, isFree: true };
+  if (exceptPostId) filter._id = { $ne: exceptPostId };
+  const used = await CommunityPost.countDocuments(filter);
+  if (used >= MAX_FREE_POSTS) {
+    throw ApiError.badRequest(`You can have up to ${MAX_FREE_POSTS} free posts — make one of them paid first`, 'FREE_POST_LIMIT');
+  }
+}
+
 const createPost = catchAsync(async (req, res) => {
   const community = await cs.findCommunity(req.params.id);
   const membership = await cs.getMembership(community._id, req.user._id);
@@ -580,6 +687,13 @@ const createPost = catchAsync(async (req, res) => {
   }
   const isAnnouncement = toBool(req.body.isAnnouncement);
   if (isAnnouncement && !isMod) throw ApiError.forbidden('Only the owner and moderators can post announcements');
+
+  // Free preview post (paid communities, owner / moderators, max 3).
+  const isFree = toBool(req.body.isFree) && Boolean(community.isPaid);
+  if (isFree) {
+    if (!isMod) throw ApiError.forbidden('Only the owner and moderators can add free posts');
+    await assertFreeSlot(community._id);
+  }
 
   const text = String(req.body.text || '').trim();
   const mediaItems = (req.files || []).map((file) => ({
@@ -599,6 +713,7 @@ const createPost = catchAsync(async (req, res) => {
     mediaItems,
     poll,
     isAnnouncement,
+    isFree,
     mentions,
   });
   await Community.updateOne({ _id: community._id }, { $inc: { discussionCount: 1 }, lastActivityAt: new Date() });
@@ -641,7 +756,7 @@ const createPost = catchAsync(async (req, res) => {
 
 const getPost = catchAsync(async (req, res) => {
   const { post, community, membership } = await loadPostWithAccess(req.params.postId, req.user?._id);
-  cs.assertCanView(community, membership);
+  cs.assertCanViewPost(community, membership, post);
   await post.populate('author', cs.AUTHOR_FIELDS);
   const [serialized] = await serializePosts([post], req.user?._id);
   serialized.community = serializeCommunity(community, membership);
@@ -700,6 +815,24 @@ const togglePin = catchAsync(async (req, res) => {
   return new ApiResponse(200, { isPinned: post.isPinned }, post.isPinned ? 'Post pinned' : 'Post unpinned').send(res);
 });
 
+/** POST /communities/posts/:postId/free  { isFree } — owner / moderators of a paid community. */
+const toggleFree = catchAsync(async (req, res) => {
+  const { post, community, membership } = await loadPostWithAccess(req.params.postId, req.user._id);
+  cs.assertModerator(membership);
+  if (!community.isPaid) throw ApiError.badRequest('Free posts are only for paid communities — every post here is already open');
+
+  const makeFree = req.body?.isFree === undefined ? !post.isFree : toBool(req.body.isFree);
+  if (makeFree && !post.isFree) await assertFreeSlot(community._id, post._id);
+  post.isFree = makeFree;
+  await post.save();
+  const freeCount = await CommunityPost.countDocuments({ community: community._id, isFree: true });
+  return new ApiResponse(
+    200,
+    { isFree: post.isFree, freeCount, maxFree: MAX_FREE_POSTS },
+    post.isFree ? 'Anyone can now see this post' : 'This post is for members only now'
+  ).send(res);
+});
+
 const votePoll = catchAsync(async (req, res) => {
   const { post, membership } = await loadPostWithAccess(req.params.postId, req.user._id);
   cs.assertMember(membership);
@@ -733,7 +866,7 @@ const votePoll = catchAsync(async (req, res) => {
 
 const listComments = catchAsync(async (req, res) => {
   const { post, community, membership } = await loadPostWithAccess(req.params.postId, req.user?._id);
-  cs.assertCanView(community, membership);
+  cs.assertCanViewPost(community, membership, post);
 
   const { page, limit, skip } = pageParams(req.query, 30, 50);
   const filter = { post: post._id, parentComment: null };
@@ -1083,6 +1216,7 @@ module.exports = {
   deletePost,
   togglePostLike,
   togglePin,
+  toggleFree,
   votePoll,
   listComments,
   addComment,

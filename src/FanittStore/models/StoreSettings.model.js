@@ -37,6 +37,13 @@ const storeSettingsSchema = new mongoose.Schema(
     // a new store. Off: anyone can open one. Existing stores aren't affected.
     requireSubscription: { type: Boolean, default: false },
 
+    // Physical products (Fanitt Shop): cart, Cash on Delivery / online.
+    shopEnabled: { type: Boolean, default: true },
+    shopFeePercent: { type: Number, default: DEFAULT_FEES.STORE_FEE_PERCENT, min: 0, max: 50 }, // on the items total
+    shopCodEnabled: { type: Boolean, default: true },
+    shopOnlineEnabled: { type: Boolean, default: true },
+    shopCodMaxAmount: { type: Number, default: 1000000, min: 0 }, // paise; 0 = no limit (default ₹10,000)
+
     termsVersion: { type: String, default: '1.0' },
     termsText: {
       type: String,

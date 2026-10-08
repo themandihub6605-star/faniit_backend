@@ -54,6 +54,12 @@ const communityPostSchema = new mongoose.Schema(
     // Announcements are posted by owner/moderators and notify every member.
     isAnnouncement: { type: Boolean, default: false },
     isPinned: { type: Boolean, default: false },
+    // Paid communities: the owner can open up to 3 posts to everyone as a
+    // free preview — no plan needed to read them.
+    isFree: { type: Boolean, default: false },
+    // Tiny blurred picture (data URI) shown on the locked preview to people
+    // without a plan. Made once, the first time it's needed; '' = no media.
+    teaserImage: { type: String, default: null, select: false },
     pinnedAt: { type: Date, default: null },
 
     likedBy: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }], default: [], select: false },
@@ -68,5 +74,6 @@ const communityPostSchema = new mongoose.Schema(
 
 communityPostSchema.index({ community: 1, isPinned: -1, createdAt: -1 });
 communityPostSchema.index({ community: 1, likeCount: -1 });
+communityPostSchema.index({ community: 1, isFree: 1, createdAt: -1 });
 
-module.exports = mongoose.model('CommunityPost', communityPostSchema);
+module.exports = mongoose.models.CommunityPost || mongoose.model('CommunityPost', communityPostSchema);

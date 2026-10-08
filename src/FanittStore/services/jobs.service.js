@@ -7,6 +7,7 @@ const log = require('../utils/logger');
 // Background jobs for the store, started from server.js.
 //  - call timeouts / auto-end
 //  - lives left running for over 12 hours are closed
+//  - shop checkouts not paid online in 30 minutes are released
 
 const LIVE_MAX_MS = 12 * 60 * 60 * 1000;
 let timer = null;
@@ -17,6 +18,8 @@ async function tick() {
   running = true;
   try {
     await callService.runTimeouts();
+    // Shop: online checkouts not paid in 30 minutes → stock back.
+    await require('./commerce.service').expireUnpaid();
     // Paid communities: expire ended memberships, send renew reminders.
     await require('../../services/communityPaid.service').runSweep();
     const stale = await LiveStream.find({ status: LIVE_STATUS.LIVE, startedAt: { $lt: new Date(Date.now() - LIVE_MAX_MS) } }).limit(20);

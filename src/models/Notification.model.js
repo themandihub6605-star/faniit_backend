@@ -40,7 +40,7 @@ const NOTIFICATION_TYPES = [
   'store_call',
 ];
 
-const RELATED_MODELS = ['Post', 'User', 'Session', 'Milestone', 'Dispute', 'Gift', 'Proposal', 'Campaign', 'Collaboration', 'Conversation', 'Community', 'CommunityPost', 'Broadcast', 'Store', 'StoreOrder', 'DigitalProduct', 'LiveStream', 'CallSession', 'Withdrawal', 'AffiliateProduct'];
+const RELATED_MODELS = ['Post', 'User', 'Session', 'Milestone', 'Dispute', 'Gift', 'Proposal', 'Campaign', 'Collaboration', 'Conversation', 'Community', 'CommunityPost', 'Broadcast', 'Store', 'StoreOrder', 'DigitalProduct', 'LiveStream', 'CallSession', 'Withdrawal', 'AffiliateProduct', 'ShopOrder', 'ShopProduct'];
 
 const notificationSchema = new mongoose.Schema(
   {

@@ -8,6 +8,9 @@ const ApiError = require('../utils/apiError');
 const { SECTION_KEYS, DEFAULT_SECTIONS } = HomeLayout;
 // Sections whose items come automatically (nothing to pin).
 const NO_PINS = new Set(['live']);
+// Brands: the app home shows ONLY the brands picked here, at most this many.
+const MAX_BRANDS = 10;
+const maxPins = (key) => (key === 'brands' ? MAX_BRANDS : 20);
 
 const escape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -18,14 +21,14 @@ const storeModels = () => ({ DigitalProduct: mongoose.models.DigitalProduct, Sto
  * Finds items of one type for the admin picker — by search text or by ids.
  * Every item comes back as { id, title, subtitle, imageUrl }.
  */
-async function findItems(type, { q, ids }) {
+async function findItems(type, { q, ids, all = false }) {
   const byText = (fields) => {
     if (!q) return {};
     const pattern = new RegExp(escape(q), 'i');
     return { $or: fields.map((f) => ({ [f]: pattern })) };
   };
   const byIds = ids ? { _id: { $in: ids.filter((id) => mongoose.isValidObjectId(id)) } } : {};
-  const limit = ids ? 50 : 20;
+  const limit = ids ? 50 : all ? 300 : 20;
 
   switch (type) {
     case 'creators': {
@@ -38,8 +41,16 @@ async function findItems(type, { q, ids }) {
       return rows.map((c) => ({ id: String(c._id), title: c.user?.name || c.slug, subtitle: `${c.followerCount || 0} followers`, imageUrl: c.user?.avatarUrl || '' }));
     }
     case 'brands': {
-      const rows = await BrandProfile.find({ ...byIds, ...byText(['companyName']) }).populate('user', 'avatarUrl').limit(limit);
-      return rows.map((b) => ({ id: String(b._id), title: b.companyName, subtitle: b.industry || 'Brand', imageUrl: b.logoUrl || b.user?.avatarUrl || '' }));
+      const rows = await BrandProfile.find({ ...byIds, ...byText(['companyName']) })
+        .populate('user', 'avatarUrl')
+        .sort(all ? { verificationStatus: -1, companyName: 1 } : {})
+        .limit(limit);
+      return rows.map((b) => ({
+        id: String(b._id),
+        title: b.companyName,
+        subtitle: [b.industry || 'Brand', b.verificationStatus === 'verified' ? 'Verified' : ''].filter(Boolean).join(' · '),
+        imageUrl: b.logoUrl || b.user?.avatarUrl || '',
+      }));
     }
     case 'campaigns': {
       const rows = await Campaign.find({ ...byIds, ...byText(['title']) }).populate('brand', 'companyName logoUrl').sort({ createdAt: -1 }).limit(limit);
@@ -122,7 +133,7 @@ const saveLayout = catchAsync(async (req, res) => {
       enabled: s.enabled !== false,
       pinned: NO_PINS.has(s.key)
         ? []
-        : [...new Set((Array.isArray(s.pinned) ? s.pinned : []).map(String).filter((id) => mongoose.isValidObjectId(id)))].slice(0, 20),
+        : [...new Set((Array.isArray(s.pinned) ? s.pinned : []).map(String).filter((id) => mongoose.isValidObjectId(id)))].slice(0, maxPins(s.key)),
     });
   }
   // Sections not sent keep going at the end (hidden), so nothing is lost.
@@ -140,6 +151,8 @@ const searchItems = catchAsync(async (req, res) => {
   const type = String(req.query.type || '');
   if (!SECTION_KEYS.includes(type) || NO_PINS.has(type)) throw ApiError.badRequest('Pick a section');
   const q = String(req.query.q || '').trim();
+  // Brands: the admin picks from the full list, so empty search = every brand.
+  if (type === 'brands' && q.length < 2) return new ApiResponse(200, await findItems('brands', { q: '', all: true }), 'All brands').send(res);
   if (q.length < 2) return new ApiResponse(200, [], 'Type at least 2 letters').send(res);
   return new ApiResponse(200, await findItems(type, { q }), 'Results').send(res);
 });

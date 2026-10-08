@@ -54,6 +54,17 @@ function assertCanView(community, membership) {
   }
 }
 
+/** Paid community, not a member (and not banned): may read the free posts only. */
+function isPreviewOnly(community, membership) {
+  return Boolean(community.isPaid) && !isActive(membership) && membership?.status !== 'banned';
+}
+
+/** Reading one post: free posts of a paid community are open to everyone. */
+function assertCanViewPost(community, membership, post) {
+  if (post?.isFree && isPreviewOnly(community, membership)) return;
+  assertCanView(community, membership);
+}
+
 function assertMember(membership) {
   if (membership?.status === 'banned') throw ApiError.forbidden('You have been removed from this community');
   if (membership?.status === 'expired') throw new ApiError(402, 'Your membership ended — renew to take part', [], 'COMMUNITY_PAYMENT_REQUIRED');
@@ -159,6 +170,8 @@ module.exports = {
   getMembership,
   findCommunity,
   assertCanView,
+  isPreviewOnly,
+  assertCanViewPost,
   assertMember,
   assertModerator,
   assertOwner,

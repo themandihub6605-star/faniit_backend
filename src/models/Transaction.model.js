@@ -24,7 +24,7 @@ const transactionSchema = new mongoose.Schema(
     // validation error even though the subscription itself had already
     // been activated successfully just before that Transaction.create()
     // call ran.
-    relatedModel: { type: String, enum: ['Booking', 'Campaign', 'Session', 'Milestone', 'UserSubscription', 'StoreOrder'], default: null },
+    relatedModel: { type: String, enum: ['Booking', 'Campaign', 'Session', 'Milestone', 'UserSubscription', 'StoreOrder', 'ShopOrder'], default: null },
     relatedId: { type: mongoose.Schema.Types.ObjectId, default: null },
 
     // Razorpay references

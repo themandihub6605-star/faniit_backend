@@ -63,6 +63,13 @@ function publicConfig(settings) {
     termsVersion: settings.termsVersion,
     toolCards: [...settings.toolCards].filter((c) => c.enabled).sort((a, b) => a.order - b.order),
     webBanner: settings.webBanner?.enabled ? settings.webBanner : null,
+    shop: {
+      enabled: settings.shopEnabled !== false,
+      feePercent: settings.shopFeePercent ?? settings.storeFeePercent,
+      codEnabled: settings.shopCodEnabled !== false,
+      onlineEnabled: settings.shopOnlineEnabled !== false,
+      codMaxAmount: settings.shopCodMaxAmount || 0,
+    },
   };
 }
 

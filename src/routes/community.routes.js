@@ -28,6 +28,7 @@ router.patch('/posts/:postId', protect, c.updatePost);
 router.delete('/posts/:postId', protect, c.deletePost);
 router.post('/posts/:postId/like', protect, c.togglePostLike);
 router.post('/posts/:postId/pin', protect, c.togglePin);
+router.post('/posts/:postId/free', protect, c.toggleFree);
 router.post('/posts/:postId/vote', protect, c.votePoll);
 router.get('/posts/:postId/comments', optionalAuth, c.listComments);
 router.post('/posts/:postId/comments', protect, c.addComment);
