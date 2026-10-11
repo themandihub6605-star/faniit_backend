@@ -23,6 +23,7 @@ module.exports = {
   Message: require('./Message.model'),
   Gift: require('./Gift.model'),
   Post: require('./Post.model'),
+  Story: require('./Story.model'),
   ReferralConfig: require('./ReferralConfig.model'),
   Withdrawal: require('./Withdrawal.model'),
   SiteSettings: require('./SiteSettings.model'),

@@ -87,9 +87,25 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
 
   const isFollowing = !!(req.user && creator.followers.some((f) => f.equals(req.user._id)));
 
+  // Extra profile info for the app: their Fanitt Store and post / reel counts.
+  const Store = require('../FanittStore/models/Store.model');
+  const { Post } = require('../models');
+  const [store, postCount, reelCount] = await Promise.all([
+    Store.findOne({ user: creator.user._id, status: 'active' }).select('slug name logoUrl tagline isOpen'),
+    Post.countDocuments({ creator: creator._id, kind: { $ne: 'reel' } }),
+    Post.countDocuments({ creator: creator._id, kind: 'reel' }),
+  ]);
+  const { followers, ...publicCreator } = creatorWithPlan; // never send the follower list
+
   return new ApiResponse(
     200,
-    { creator: { ...creatorWithPlan, isFollowing }, sessions, reviews, stats: { projectsCompletedCount } },
+    {
+      creator: { ...publicCreator, isFollowing },
+      sessions,
+      reviews,
+      store: store ? { slug: store.slug, name: store.name, logoUrl: store.logoUrl, tagline: store.tagline, isOpen: store.isOpen } : null,
+      stats: { projectsCompletedCount, posts: postCount, reels: reelCount, profileViews: creator.profileViews || 0 },
+    },
     'Creator profile fetched'
   ).send(res);
 });

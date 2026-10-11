@@ -24,13 +24,15 @@ router.use('/communities', require('./community.routes'));
 router.use('/chat', require('./chat.routes'));
 router.use('/gifts', require('./gift.routes'));
 router.use('/posts', require('./post.routes'));
+router.use('/stories', require('./story.routes'));
 router.use('/wallet', require('./wallet.routes'));
-router.use('/analytics', require('./appAnalytics.routes'));
+// Before '/admin' so admin.routes doesn't catch it first.
 router.use('/admin/account-deletions', require('./accountDeletion.routes'));
 router.use('/admin', require('./admin.routes'));
-  router.use('/legal', require('./legal.routes'));
 router.use('/home', require('./home.routes'));
 router.use('/subscriptions', require('./subscription.routes'));
+router.use('/analytics', require('./appAnalytics.routes')); // app screen tracking + admin report
+router.use('/legal', require('./legal.routes')); // Privacy Policy / Terms
 
 // Fanitt Store — all store code lives in src/FanittStore
 router.use('/store', require('../FanittStore'));

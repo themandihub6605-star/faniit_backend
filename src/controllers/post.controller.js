@@ -1,168 +1,179 @@
 const mongoose = require('mongoose');
-const { Post, CreatorProfile, User } = require('../models');
+const { Post, CreatorProfile, BrandProfile } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
-const { ROLES } = require('../constants/enums');
 const notificationService = require('../services/notification.service');
+const feed = require('../services/feed.service');
 
-const MAX_POSTS_PER_CREATOR = 5;
-const MAX_MEDIA_PER_POST = 5;
+// Feed posts and reels by creators and brands.
+//
+//   POST   /posts                   multipart `media` (1-10 files), caption, kind=post|reel, durations
+//   GET    /posts/config            limits for the apps
+//   GET    /posts/feed              posts only (no reels), newest first, paged
+//   GET    /posts/reels             reels, newest first, paged; ?start=<id> puts that reel first
+//   GET    /posts/me                my posts + reels (?kind=)
+//   GET    /posts/saved · POST /posts/:id/save   saved posts
+//   GET    /posts/creator/:id       a creator's posts (?kind=)
+//   GET    /posts/brand/:id         a brand's posts (?kind=)
+//   GET    /posts/:id               one post / reel
+//   POST   /posts/:id/like · GET /posts/:id/likes · POST /posts/:id/view (reels)
+//   PATCH  /posts/:id (caption) · DELETE /posts/:id
+
+const { KINDS, LIMITS } = Post;
+const MAX_POSTS = 50; // per account
+const MAX_REELS = 50; // per account
+const MAX_POSTS_PER_CREATOR = MAX_POSTS; // kept for old imports
+
+function pageParams(query, def = 12, max = 30) {
+  const page = Math.max(1, parseInt(query.page, 10) || 1);
+  const limit = Math.min(max, Math.max(1, parseInt(query.limit, 10) || def));
+  return { page, limit, skip: (page - 1) * limit };
+}
+
+function kindFilter(kind) {
+  if (kind === KINDS.REEL) return { kind: KINDS.REEL };
+  if (kind === KINDS.POST) return { kind: { $ne: KINDS.REEL } }; // old posts have no kind
+  return {};
+}
+
+/** Lean query with author populated → API shape. */
+async function load(filter, { sort = { createdAt: -1 }, skip = 0, limit = 0 } = {}, userId) {
+  let q = Post.find(filter).sort(sort).populate(feed.POPULATE).lean();
+  if (skip) q = q.skip(skip);
+  if (limit) q = q.limit(limit);
+  return feed.serializePosts(await q, userId);
+}
+
+/** Old posts only have `creator`; treat it as the author for ownership. */
+async function isOwner(post, user) {
+  if (post.author && String(post.author) === String(user._id)) return true;
+  if (post.creator) return Boolean(await CreatorProfile.exists({ _id: post.creator, user: user._id }));
+  if (post.brand) return Boolean(await BrandProfile.exists({ _id: post.brand, user: user._id }));
+  return false;
+}
+
+// ---------- create ----------
 
 const createPost = catchAsync(async (req, res) => {
-  if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can post content');
-
   const files = req.files || [];
-  if (files.length === 0) throw ApiError.badRequest('No file uploaded');
-  if (files.length > MAX_MEDIA_PER_POST) throw ApiError.badRequest(`You can upload up to ${MAX_MEDIA_PER_POST} photos/videos per post`);
+  const kind = req.body.kind === KINDS.REEL ? KINDS.REEL : KINDS.POST;
+  if (!files.length) throw ApiError.badRequest('Add a photo or video');
 
-  const creator = await CreatorProfile.findOne({ user: req.user._id });
-  if (!creator) throw ApiError.notFound('Creator profile not found');
+  const poster = await feed.resolvePoster(req.user);
+  const durations = feed.parseDurations(req.body.durations);
+  const ratios = feed.parseDurations(req.body.aspectRatios); // same JSON-array format
+  const mediaItems = files.map((f, i) => feed.mediaFromFile(f, durations[i], ratios[i]));
 
-  const existingCount = await Post.countDocuments({ creator: creator._id });
-  if (existingCount >= MAX_POSTS_PER_CREATOR) {
-    throw ApiError.badRequest(`You've reached the limit of ${MAX_POSTS_PER_CREATOR} posts. Delete an old one to add a new one.`);
+  if (kind === KINDS.REEL) {
+    if (files.length !== 1 || mediaItems[0].type !== 'video') throw ApiError.badRequest('A reel is one short video');
+    if (mediaItems[0].duration > LIMITS.REEL_MAX_SECONDS) {
+      throw ApiError.badRequest(`Reels can be up to ${LIMITS.REEL_MAX_SECONDS} seconds — post it as a normal post instead`);
+    }
+  } else if (files.length > LIMITS.MEDIA_PER_POST) {
+    throw ApiError.badRequest(`You can add up to ${LIMITS.MEDIA_PER_POST} photos/videos per post`);
   }
 
-  // Optional: the app sends each item's width ÷ height (same order as the files).
-  let ratios = [];
-  try {
-    ratios = JSON.parse(req.body.aspectRatios || '[]');
-  } catch {
-    ratios = [];
-  }
-  const mediaItems = files.map((file, i) => {
-    const ratio = Number(ratios[i]);
-    return {
-      url: file.path,
-      type: file.mimetype.startsWith('video') ? 'video' : 'image',
-      aspectRatio: Number.isFinite(ratio) && ratio >= 0.2 && ratio <= 5 ? Math.round(ratio * 1000) / 1000 : null,
-    };
-  });
+  const cap = kind === KINDS.REEL ? MAX_REELS : MAX_POSTS;
+  const count = await Post.countDocuments({ ...feed.ownerFilter(poster), ...kindFilter(kind) });
+  if (count >= cap) throw ApiError.badRequest(`You've reached the limit of ${cap} ${kind}s. Delete an old one to add a new one.`);
 
   const post = await Post.create({
-    creator: creator._id,
+    kind,
+    author: req.user._id,
+    ...poster,
     mediaItems,
-    caption: req.body.caption || '',
+    caption: String(req.body.caption || '').slice(0, 500),
   });
-
-  return new ApiResponse(201, post, 'Post published').send(res);
+  const [shaped] = await load({ _id: post._id }, {}, req.user._id);
+  return new ApiResponse(201, shaped, kind === KINDS.REEL ? 'Reel published' : 'Post published').send(res);
 });
 
-// Attaches isFollowing to each post's creator, based on req.user (may be
-// undefined for guests thanks to optionalAuth).
-function withFollowFlag(posts, userId) {
-  return posts.map((post) => {
-    const creator = post.creator;
-    if (!creator) return post;
-    const isFollowing = !!(userId && creator.followers?.some((f) => f.toString() === userId));
-    return {
-      ...post,
-      creator: { _id: creator._id, slug: creator.slug, user: creator.user, isFollowing },
-    };
-  });
-}
+// ---------- read ----------
 
-// Adds isSaved for the current user and never sends the savedBy list.
-function withSavedFlag(posts, userId) {
-  return posts.map((post) => {
-    const { savedBy, ...rest } = post;
-    return { ...rest, isSaved: !!(userId && (savedBy || []).some((id) => id.toString() === userId)) };
-  });
-}
+const getConfig = catchAsync(async (req, res) =>
+  new ApiResponse(200, { maxPosts: MAX_POSTS, maxReels: MAX_REELS, mediaPerPost: LIMITS.MEDIA_PER_POST, reelMaxSeconds: LIMITS.REEL_MAX_SECONDS }, 'Post config').send(res)
+);
 
-// Attaches likePreview — the first few likers' name/avatar, for the
-// Instagram-style "liked by [avatars] X and others" row. One batched
-// User query for the whole page of posts, not one query per post.
-async function withLikePreview(posts) {
-  const previewIds = new Set();
-  posts.forEach((p) => {
-    (p.likedBy || []).slice(0, 3).forEach((id) => previewIds.add(id.toString()));
-  });
+/** Feed = normal posts only. Reels come from /posts/reels (shown as a row). */
+const getFeed = catchAsync(async (req, res) => {
+  const { limit, skip } = pageParams(req.query);
+  const posts = await load(kindFilter(KINDS.POST), { skip, limit }, req.user?._id);
+  return new ApiResponse(200, posts, 'Feed fetched').send(res);
+});
 
-  if (previewIds.size === 0) {
-    return posts.map((p) => ({ ...p, likePreview: [] }));
+/** Reels, newest first. `start` (a reel id) is put first — for opening the player on it. */
+const getReels = catchAsync(async (req, res) => {
+  const { page, limit, skip } = pageParams(req.query, 10, 30);
+  const filter = { kind: KINDS.REEL };
+  const startId = mongoose.isValidObjectId(req.query.start) ? req.query.start : null;
+  if (startId) filter._id = { $ne: new mongoose.Types.ObjectId(startId) };
+  const [reels, total] = await Promise.all([load(filter, { skip, limit }, req.user?._id), Post.countDocuments(filter)]);
+  let items = reels;
+  if (startId && page === 1) {
+    const [first] = await load({ _id: startId, kind: KINDS.REEL }, {}, req.user?._id);
+    if (first) items = [first, ...reels];
   }
+  return new ApiResponse(200, { items, total, page, pages: Math.ceil(total / limit), hasMore: skip + reels.length < total }, 'Reels fetched').send(res);
+});
 
-  const users = await User.find({ _id: { $in: Array.from(previewIds) } })
-    .select('name avatarUrl')
-    .lean();
-  const userMap = new Map(users.map((u) => [u._id.toString(), u]));
-
-  return posts.map((p) => ({
-    ...p,
-    likePreview: (p.likedBy || [])
-      .slice(0, 3)
-      .map((id) => userMap.get(id.toString()))
-      .filter(Boolean),
-  }));
-}
+const getPost = catchAsync(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.notFound('Post not found');
+  const [post] = await load({ _id: req.params.id }, {}, req.user?._id);
+  if (!post) throw ApiError.notFound('Post not found');
+  return new ApiResponse(200, post, 'Post fetched').send(res);
+});
 
 const getCreatorPosts = catchAsync(async (req, res) => {
-  const posts = await Post.find({ creator: req.params.creatorId })
-    .populate({ path: 'creator', populate: { path: 'user', select: 'name avatarUrl' }, select: 'slug user followers' })
-    .sort({ createdAt: -1 })
-    .lean();
+  if (!mongoose.isValidObjectId(req.params.creatorId)) return new ApiResponse(200, [], 'Posts fetched').send(res);
+  const posts = await load({ creator: req.params.creatorId, ...kindFilter(req.query.kind) }, {}, req.user?._id);
+  return new ApiResponse(200, posts, 'Posts fetched').send(res);
+});
 
-  const userId = req.user?._id?.toString();
-  const withFollow = withFollowFlag(posts, userId);
-  const withLikes = await withLikePreview(withFollow);
-  return new ApiResponse(200, withSavedFlag(withLikes, userId), 'Posts fetched').send(res);
+const getBrandPosts = catchAsync(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.brandId)) return new ApiResponse(200, [], 'Posts fetched').send(res);
+  const posts = await load({ brand: req.params.brandId, ...kindFilter(req.query.kind) }, {}, req.user?._id);
+  return new ApiResponse(200, posts, 'Posts fetched').send(res);
 });
 
 const getMyPosts = catchAsync(async (req, res) => {
-  if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators have posts to manage');
-
-  const creator = await CreatorProfile.findOne({ user: req.user._id });
-  if (!creator) throw ApiError.notFound('Creator profile not found');
-
-  const posts = await Post.find({ creator: creator._id }).select('-savedBy').sort({ createdAt: -1 });
+  const poster = await feed.resolvePoster(req.user);
+  const posts = await load({ ...feed.ownerFilter(poster), ...kindFilter(req.query.kind) }, {}, req.user._id);
   return new ApiResponse(200, posts, 'Your posts fetched').send(res);
 });
 
-const getFeed = catchAsync(async (req, res) => {
-  const { limit = 12 } = req.query;
-
-  const posts = await Post.find()
-    .populate({ path: 'creator', populate: { path: 'user', select: 'name avatarUrl' }, select: 'slug user followers' })
-    .sort({ createdAt: -1 })
-    .limit(Number(limit))
-    .lean();
-
-  const userId = req.user?._id?.toString();
-  const withFollow = withFollowFlag(posts, userId);
-  const withLikes = await withLikePreview(withFollow);
-  return new ApiResponse(200, withSavedFlag(withLikes, userId), 'Feed fetched').send(res);
+/** GET /posts/me/stats — numbers for the Profile screen (any role). */
+const getMyStats = catchAsync(async (req, res) => {
+  const me = req.user._id;
+  const [creator, brand, followingCreators, followingBrands] = await Promise.all([
+    CreatorProfile.findOne({ user: me }).select('_id followerCount'),
+    BrandProfile.findOne({ user: me }).select('_id followerCount'),
+    CreatorProfile.countDocuments({ followers: me }),
+    BrandProfile.countDocuments({ followers: me }),
+  ]);
+  const profile = creator || brand;
+  const owner = creator ? { creator: creator._id } : brand ? { brand: brand._id } : null;
+  const [posts, reels] = owner
+    ? await Promise.all([Post.countDocuments({ ...owner, ...kindFilter(KINDS.POST) }), Post.countDocuments({ ...owner, kind: KINDS.REEL })])
+    : [0, 0];
+  return new ApiResponse(
+    200,
+    { followers: profile?.followerCount || 0, following: followingCreators + followingBrands, posts, reels, canPost: Boolean(owner) },
+    'Profile stats'
+  ).send(res);
 });
 
-// GET /posts/:id — one post (opened from a shared link).
-const getPost = catchAsync(async (req, res) => {
-  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.notFound('Post not found');
-  const posts = await Post.find({ _id: req.params.id })
-    .populate({ path: 'creator', populate: { path: 'user', select: 'name avatarUrl' }, select: 'slug user followers' })
-    .lean();
-  if (!posts.length) throw ApiError.notFound('Post not found');
-  const userId = req.user?._id?.toString();
-  const withLikes = await withLikePreview(withFollowFlag(posts, userId));
-  return new ApiResponse(200, withSavedFlag(withLikes, userId)[0], 'Post fetched').send(res);
-});
-
-// GET /posts/saved — posts the current user saved, newest first.
+/** GET /posts/saved — posts the current user saved, newest first. */
 const getSavedPosts = catchAsync(async (req, res) => {
-  const posts = await Post.find({ savedBy: req.user._id })
-    .populate({ path: 'creator', populate: { path: 'user', select: 'name avatarUrl' }, select: 'slug user followers' })
-    .sort({ createdAt: -1 })
-    .limit(100)
-    .lean();
-
-  const userId = req.user._id.toString();
-  const withFollow = withFollowFlag(posts, userId);
-  const withLikes = await withLikePreview(withFollow);
-  return new ApiResponse(200, withSavedFlag(withLikes, userId), 'Saved posts fetched').send(res);
+  const posts = await load({ savedBy: req.user._id }, { limit: 100 }, req.user._id);
+  return new ApiResponse(200, posts, 'Saved posts fetched').send(res);
 });
 
-// POST /posts/:id/save — save or unsave a post.
+// ---------- actions ----------
+
+/** POST /posts/:id/save — save or unsave a post. */
 const toggleSave = catchAsync(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.notFound('Post not found');
   const post = await Post.findById(req.params.id).select('_id savedBy');
   if (!post) throw ApiError.notFound('Post not found');
   const alreadySaved = post.savedBy.some((id) => id.equals(req.user._id));
@@ -175,30 +186,38 @@ const toggleLike = catchAsync(async (req, res) => {
   if (!post) throw ApiError.notFound('Post not found');
 
   const alreadyLiked = post.likedBy.some((id) => id.equals(req.user._id));
-
   if (alreadyLiked) {
     post.likedBy.pull(req.user._id);
     post.likeCount = Math.max(0, post.likeCount - 1);
   } else {
     post.likedBy.push(req.user._id);
     post.likeCount += 1;
-
-    const creator = await CreatorProfile.findById(post.creator);
-    if (creator && !creator.user.equals(req.user._id)) {
-      await notificationService.notify({
-        userId: creator.user,
-        fromUser: req.user._id,
-        type: 'like',
-        relatedModel: 'Post',
-        relatedId: post._id,
-        title: 'New like',
-        message: `${req.user.name} liked your post`,
-      });
+    const ownerId = post.author || (post.creator && (await CreatorProfile.findById(post.creator).select('user'))?.user);
+    if (ownerId && String(ownerId) !== String(req.user._id)) {
+      await notificationService
+        .notify({
+          userId: ownerId,
+          fromUser: req.user._id,
+          type: 'like',
+          relatedModel: 'Post',
+          relatedId: post._id,
+          title: 'New like',
+          message: `${req.user.name} liked your ${post.kind === KINDS.REEL ? 'reel' : 'post'}`,
+        })
+        .catch(() => {});
     }
   }
   await post.save();
-
   return new ApiResponse(200, { liked: !alreadyLiked, likeCount: post.likeCount }, alreadyLiked ? 'Unliked' : 'Liked').send(res);
+});
+
+/** Counts a reel view (the app calls it once per reel per session). */
+const addView = catchAsync(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.notFound('Post not found');
+  const res1 = await Post.updateOne({ _id: req.params.id }, { $inc: { viewCount: 1 } });
+  if (!res1.matchedCount) throw ApiError.notFound('Post not found');
+  const post = await Post.findById(req.params.id).select('viewCount').lean();
+  return new ApiResponse(200, { viewCount: post.viewCount }, 'Viewed').send(res);
 });
 
 const getPostLikes = catchAsync(async (req, res) => {
@@ -208,24 +227,39 @@ const getPostLikes = catchAsync(async (req, res) => {
 });
 
 const updatePost = catchAsync(async (req, res) => {
-  const { caption } = req.body;
-  const post = await Post.findById(req.params.id).populate('creator');
+  const post = await Post.findById(req.params.id);
   if (!post) throw ApiError.notFound('Post not found');
-  if (!post.creator.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this post');
-
-  if (caption !== undefined) post.caption = caption;
+  if (!(await isOwner(post, req.user))) throw ApiError.forbidden('You do not own this post');
+  if (req.body.caption !== undefined) post.caption = String(req.body.caption).slice(0, 500);
   await post.save();
-
-  return new ApiResponse(200, post, 'Post updated').send(res);
+  const [shaped] = await load({ _id: post._id }, {}, req.user._id);
+  return new ApiResponse(200, shaped, 'Post updated').send(res);
 });
 
 const deletePost = catchAsync(async (req, res) => {
-  const post = await Post.findById(req.params.id).populate('creator');
+  const post = await Post.findById(req.params.id);
   if (!post) throw ApiError.notFound('Post not found');
-  if (!post.creator.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this post');
-
+  if (!(await isOwner(post, req.user))) throw ApiError.forbidden('You do not own this post');
   await post.deleteOne();
   return new ApiResponse(200, null, 'Post deleted').send(res);
 });
 
-module.exports = { createPost, getCreatorPosts, getMyPosts, getFeed, getSavedPosts, getPost, toggleLike, toggleSave, getPostLikes, updatePost, deletePost, MAX_POSTS_PER_CREATOR };
+module.exports = {
+  createPost,
+  getConfig,
+  getFeed,
+  getReels,
+  getPost,
+  getCreatorPosts,
+  getBrandPosts,
+  getMyPosts,
+  getSavedPosts,
+  getMyStats,
+  toggleSave,
+  toggleLike,
+  addView,
+  getPostLikes,
+  updatePost,
+  deletePost,
+  MAX_POSTS_PER_CREATOR,
+};

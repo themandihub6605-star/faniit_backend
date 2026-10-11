@@ -1,4 +1,4 @@
-const { Post, CreatorProfile, User, Notification, Community, CommunityPost, CommunityComment } = require('../models');
+const { Post, CreatorProfile, BrandProfile, User, Notification, Community, CommunityPost, CommunityComment } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -41,8 +41,10 @@ function serializeFeed(post) {
     isAnnouncement: false,
     createdAt: post.createdAt,
     updatedAt: post.updatedAt,
-    author: authorOf(post.creator?.user),
-    creatorSlug: post.creator?.slug || null,
+    kind: post.kind || 'post',
+    author: authorOf(post.creator?.user || post.brand?.user),
+    authorRole: post.brand ? 'brand' : 'creator',
+    creatorSlug: post.creator?.slug || post.brand?.slug || null,
     community: null,
   };
 }
@@ -80,14 +82,23 @@ const listPosts = catchAsync(async (req, res) => {
 
   if (type === 'feed') {
     const filter = {};
+    if (['post', 'reel'].includes(req.query.kind)) filter.kind = req.query.kind === 'reel' ? 'reel' : { $ne: 'reel' };
     if (search) {
       const userIds = await matchingUserIds(search);
       const creators = userIds.length ? await CreatorProfile.find({ user: { $in: userIds } }).select('_id') : [];
-      filter.$or = [{ caption: new RegExp(escapeRegex(search), 'i') }, { creator: { $in: creators.map((c) => c._id) } }];
+      const brands = await BrandProfile.find({ $or: [{ user: { $in: userIds } }, { companyName: new RegExp(escapeRegex(search), 'i') }] }).select('_id').limit(200);
+      filter.$or = [
+        { caption: new RegExp(escapeRegex(search), 'i') },
+        { creator: { $in: creators.map((c) => c._id) } },
+        { brand: { $in: brands.map((b) => b._id) } },
+      ];
     }
     const [posts, total] = await Promise.all([
       Post.find(filter)
-        .populate({ path: 'creator', select: 'slug user', populate: { path: 'user', select: 'name email avatarUrl role' } })
+        .populate([
+          { path: 'creator', select: 'slug user', populate: { path: 'user', select: 'name email avatarUrl role' } },
+          { path: 'brand', select: 'slug user', populate: { path: 'user', select: 'name email avatarUrl role' } },
+        ])
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit),
@@ -148,7 +159,10 @@ const updatePost = catchAsync(async (req, res) => {
       post.mediaItems = remaining;
     }
     await post.save();
-    await post.populate({ path: 'creator', select: 'slug user', populate: { path: 'user', select: 'name email avatarUrl role' } });
+    await post.populate([
+          { path: 'creator', select: 'slug user', populate: { path: 'user', select: 'name email avatarUrl role' } },
+          { path: 'brand', select: 'slug user', populate: { path: 'user', select: 'name email avatarUrl role' } },
+        ]);
     return new ApiResponse(200, serializeFeed(post), 'Post updated').send(res);
   }
 

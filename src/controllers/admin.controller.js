@@ -225,6 +225,7 @@ const getUserDetail = catchAsync(async (req, res) => {
     }
   } else if (user.role === ROLES.BRAND) {
     roleProfile = await BrandProfile.findOne({ user: user._id });
+    if (roleProfile) posts = await Post.find({ brand: roleProfile._id }).sort({ createdAt: -1 });
   } else if (user.role === ROLES.AGENCY) {
     roleProfile = await AgencyProfile.findOne({ user: user._id });
   }

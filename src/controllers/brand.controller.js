@@ -3,6 +3,7 @@ const catchAsync = require('../utils/catchAsync');
 const { pinnedIds } = require('../utils/pinnedIds');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
+const notificationService = require('../services/notification.service');
 const generateSlug = require('../utils/slugify');
 const { ROLES, TRANSACTION_TYPE, VERIFICATION_STATUS } = require('../constants/enums');
 
@@ -201,6 +202,18 @@ const followBrand = catchAsync(async (req, res) => {
   } else {
     brand.followers.push(req.user._id);
     brand.followerCount += 1;
+    // Shows in the brand's Activity (♥ in the app's feed).
+    notificationService
+      .notify({
+        userId: brand.user,
+        fromUser: req.user._id,
+        type: 'follow',
+        relatedModel: 'User',
+        relatedId: req.user._id,
+        title: 'New follower',
+        message: `${req.user.name} started following you`,
+      })
+      .catch(() => {});
   }
   await brand.save();
 
