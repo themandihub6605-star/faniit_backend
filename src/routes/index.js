@@ -1,6 +1,10 @@
 const express = require('express');
 const router = express.Router();
 
+// Admin monitoring — records admin actions, logins and API errors (src/monitor).
+const monitor = require('../monitor');
+router.use(monitor.tracker);
+
 // Public webhook routes (no auth) — keep at top
 router.use('/whatsapp', require('./whatsapp.routes'));
 
@@ -26,7 +30,8 @@ router.use('/gifts', require('./gift.routes'));
 router.use('/posts', require('./post.routes'));
 router.use('/stories', require('./story.routes'));
 router.use('/wallet', require('./wallet.routes'));
-// Before '/admin' so admin.routes doesn't catch it first.
+// Before '/admin' so admin.routes doesn't catch them first.
+router.use('/admin/monitor', monitor.routes);
 router.use('/admin/account-deletions', require('./accountDeletion.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/home', require('./home.routes'));
