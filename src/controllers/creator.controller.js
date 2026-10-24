@@ -1,4 +1,4 @@
-const { CreatorProfile, Session, Booking, Transaction, Review, UserSubscription } = require('../models');
+const { CreatorProfile, Session, Booking, Transaction, Review, UserSubscription, User } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -17,9 +17,18 @@ const listCreators = catchAsync(async (req, res) => {
   if (location) filter.location = new RegExp(location, 'i');
   if (minFollowers) filter.followerCount = { $gte: Number(minFollowers) };
   if (search) {
-    const escaped = String(search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const pattern = new RegExp(escaped, 'i');
-    filter.$or = [{ bio: pattern }, { title: pattern }, { skills: pattern }, { location: pattern }];
+    // The creator's name lives on the User — match it too (plus the profile slug).
+    const users = await User.find({ role: ROLES.CREATOR, name: pattern }).select('_id').limit(200).lean();
+    filter.$or = [
+      { user: { $in: users.map((u) => u._id) } },
+      { slug: pattern },
+      { title: pattern },
+      { bio: pattern },
+      { skills: pattern },
+      { location: pattern },
+    ];
   }
 
   const creators = await CreatorProfile.find(filter)

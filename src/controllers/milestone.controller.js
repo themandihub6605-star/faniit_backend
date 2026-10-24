@@ -1,3 +1,4 @@
+// File: src/controllers/milestone.controller.js
 const { Campaign, Milestone, CreatorProfile, SiteSettings } = require('../models');
 const paymentService = require('../services/payment.service');
 const milestoneService = require('../services/milestone.service');
@@ -56,6 +57,8 @@ const verifyMilestonePayment = catchAsync(async (req, res) => {
 
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
+  // The payment must be real, unused and for exactly this milestone's amount.
+  await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId, expectedAmount: milestone.amount });
 
   const { milestone: fundedMilestone } = await milestoneService.fundMilestone({
     milestoneId: milestone._id,

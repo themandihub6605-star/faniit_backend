@@ -2,11 +2,11 @@ const mongoose = require('mongoose');
 const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
 const ApiError = require('../../utils/apiError');
-const { CallSession } = require('../models');
-const { CALL_STATUS } = require('../constants');
+const { CallSession, Store } = require('../models');
+const { CALL_STATUS, STORE_STATUS } = require('../constants');
 const storeService = require('../services/store.service');
 const callService = require('../services/call.service');
-const { order: serializeOrder } = require('../utils/serialize');
+const { order: serializeOrder, publicStore } = require('../utils/serialize');
 const { pageParams } = require('../utils/text');
 
 // 1-to-1 calls — creator settings (/me/calls) and both sides of a call (/calls).
@@ -108,6 +108,28 @@ const getCall = catchAsync(async (req, res) => {
   return new ApiResponse(200, serializeCall(call, req.user._id), 'Call fetched').send(res);
 });
 
+/**
+ * GET /api/store/calls/available?page= — creators taking 1-to-1 calls
+ * (calls switched on, store live and open). Online first, then the most
+ * recently online. Each store comes with the same call info as its page
+ * (online / busy / audio + video rate per minute, 0 = free).
+ */
+const listAvailable = catchAsync(async (req, res) => {
+  const { page, limit, skip } = pageParams(req.query);
+  const filter = { status: STORE_STATUS.ACTIVE, isOpen: true, 'calls.enabled': true };
+  const [stores, total] = await Promise.all([
+    Store.find(filter).sort({ 'calls.online': -1, 'calls.lastOnlineAt': -1, 'stats.orders': -1 }).skip(skip).limit(limit),
+    Store.countDocuments(filter),
+  ]);
+  const items = await Promise.all(
+    stores
+      // Don't offer people a call with themselves.
+      .filter((s) => !(req.user && String(s.user) === String(req.user._id)))
+      .map(async (s) => ({ ...publicStore(s), calls: await callService.publicCallInfo(s) }))
+  );
+  return new ApiResponse(200, { stores: items, total, page, pages: Math.ceil(total / limit) }, 'Creators taking calls').send(res);
+});
+
 /** POST /api/store/stores/:storeId/calls { type, minutes, note?, payWith? } */
 const requestCall = catchAsync(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.storeId)) throw ApiError.notFound('Store not found');
@@ -143,6 +165,7 @@ const joinCall = catchAsync(async (req, res) => {
 });
 
 module.exports = {
+  listAvailable,
   getSettings,
   updateSettings,
   setOnline,

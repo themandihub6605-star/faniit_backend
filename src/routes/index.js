@@ -1,3 +1,4 @@
+// File: src/routes/index.js
 const express = require('express');
 const router = express.Router();
 
@@ -33,11 +34,13 @@ router.use('/wallet', require('./wallet.routes'));
 // Before '/admin' so admin.routes doesn't catch them first.
 router.use('/admin/monitor', monitor.routes);
 router.use('/admin/account-deletions', require('./accountDeletion.routes'));
+router.use('/admin/contact-messages', require('./adminContact.routes'));
 router.use('/admin', require('./admin.routes'));
 router.use('/home', require('./home.routes'));
 router.use('/subscriptions', require('./subscription.routes'));
 router.use('/analytics', require('./appAnalytics.routes')); // app screen tracking + admin report
-router.use('/legal', require('./legal.routes')); // Privacy Policy / Terms
+router.use('/legal', require('./legal.routes')); // Privacy Policy / Terms / Refund policy
+router.use('/contact', require('./contact.routes')); // website contact form
 
 // Fanitt Store — all store code lives in src/FanittStore
 router.use('/store', require('../FanittStore'));

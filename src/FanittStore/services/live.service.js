@@ -1,7 +1,9 @@
+// File: src/FanittStore/services/live.service.js
 const crypto = require('crypto');
 const ApiError = require('../../utils/apiError');
 const { LiveStream, StoreOrder } = require('../models');
-const { LIVE_STATUS, ORDER_STATUS, LIMITS } = require('../constants');
+const mongoose = require('mongoose');
+const { LIVE_STATUS, ORDER_STATUS, LIMITS, LIVE_VISIBILITY, LIVE_PRIVATE_MODE } = require('../constants');
 const livekit = require('./livekit.service');
 const orderService = require('./order.service');
 const { safeNotify } = require('./notify.service');
@@ -47,6 +49,60 @@ async function paidTicketHolders(live) {
   return StoreOrder.find({ itemId: live._id, status: ORDER_STATUS.PAID }).select('buyer');
 }
 
+/**
+ * Followers of the host who are allowed to watch this live.
+ * Public → every follower. Private → only followers who are in the live's
+ * audience (hand-picked users or members of its community). Invite-link
+ * lives are skipped: the link itself is the way in.
+ */
+async function followersWhoCanWatch(live) {
+  const CreatorProfile = mongoose.models.CreatorProfile;
+  if (!CreatorProfile) return [];
+  const profile = await CreatorProfile.findOne({ user: live.host }).select('followers').lean();
+  const followers = (profile?.followers || []).map(String).filter((id) => id !== String(live.host));
+  if (!followers.length) return [];
+  if (live.visibility !== LIVE_VISIBILITY.PRIVATE) return followers;
+
+  if (live.privateMode === LIVE_PRIVATE_MODE.SELECTED) {
+    const allowed = new Set((live.allowedUsers || []).map(String));
+    return followers.filter((id) => allowed.has(id));
+  }
+  if (live.privateMode === LIVE_PRIVATE_MODE.COMMUNITY && live.community) {
+    const Membership = mongoose.models.CommunityMembership;
+    if (!Membership) return [];
+    const members = await Membership.find({ community: live.community, status: 'active', user: { $in: followers } }).distinct('user');
+    return members.map(String);
+  }
+  return [];
+}
+
+/** "<host> is live" to followers. Runs in the background; never blocks going live. */
+async function notifyFollowers(live, hostName, skip) {
+  try {
+    const ids = (await followersWhoCanWatch(live)).filter((id) => !skip.has(id));
+    const name = hostName || 'A creator you follow';
+    const BATCH = 50;
+    for (let i = 0; i < ids.length; i += BATCH) {
+      await Promise.all(
+        ids.slice(i, i + BATCH).map((userId) =>
+          safeNotify({
+            userId,
+            fromUser: live.host,
+            type: 'store_live',
+            title: `${name} is live now 🔴`,
+            message: live.title ? `"${live.title}" — tap to join.` : 'Tap to join the live stream.',
+            relatedModel: 'LiveStream',
+            relatedId: live._id,
+          })
+        )
+      );
+    }
+    log.info('live.followers_notified', { liveId: String(live._id), count: ids.length });
+  } catch (err) {
+    log.warn('live.followers_notify_failed', { liveId: String(live._id), message: err?.message });
+  }
+}
+
 async function start(live, user) {
   if (live.status === LIVE_STATUS.LIVE) return hostToken(live, user);
   if (live.status !== LIVE_STATUS.SCHEDULED) throw ApiError.badRequest(`This live is ${live.status}`);
@@ -80,6 +136,11 @@ async function start(live, user) {
       })
     )
   );
+
+  // Tell followers (ticket holders already got a message above).
+  const skip = new Set(holders.map((o) => String(o.buyer)));
+  notifyFollowers(started, user?.name, skip);
+
   return token;
 }
 

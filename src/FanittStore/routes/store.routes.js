@@ -1,3 +1,4 @@
+// File: src/FanittStore/routes/store.routes.js
 const express = require('express');
 const { protect, optionalAuth } = require('../../middlewares/auth.middleware');
 const { authorize } = require('../../middlewares/role.middleware');
@@ -11,6 +12,7 @@ const shop = require('../controllers/shop.controller');
 const live = require('../controllers/live.controller');
 const call = require('../controllers/call.controller');
 const meet = require('../controllers/meet.controller');
+const meetHost = require('../controllers/meetHost.controller');
 const affiliate = require('../controllers/affiliate.controller');
 const fanbox = require('../controllers/fanbox.controller');
 const analytics = require('../controllers/analytics.controller');
@@ -33,6 +35,12 @@ router.get('/meets', optionalAuth, meet.listMeets);
 router.get('/meets/:id', optionalAuth, meet.getMeet);
 router.post('/meets/:id/join', protect, meet.joinMeet);
 router.post('/meets/:id/end', protect, meet.endMeet);
+// Host controls + attendance (each checks the caller is the host)
+router.get('/meets/:id/attendance', protect, meetHost.meetAttendance);
+router.get('/meets/:id/host/participants', protect, meetHost.participants);
+router.post('/meets/:id/host/mute', protect, meetHost.mute);
+router.post('/meets/:id/host/remove', protect, meetHost.remove);
+router.post('/meets/:id/host/lock', protect, meetHost.lock);
 router.get('/go/:id', optionalAuth, affiliate.go);
 router.get('/fanbox/config', fanbox.getConfig);
 
@@ -71,6 +79,7 @@ router.post('/me/lives/:id/cover', ...creatorOnly, image, live.uploadLiveCover);
 router.post('/me/lives/:id/start', ...creatorOnly, live.startLive);
 router.post('/me/lives/:id/end', ...creatorOnly, live.endLive);
 router.post('/me/lives/:id/cancel', ...creatorOnly, validate(v.reasonSchema), live.cancelLive);
+router.get('/me/lives/:id/attendance', ...creatorOnly, meetHost.liveAttendance);
 
 // ---------- Creator: calls & meets ----------
 router.get('/me/calls/settings', ...creatorOnly, call.getSettings);
@@ -107,6 +116,8 @@ router.post('/lives/:id/join', protect, validate(v.joinLiveSchema), live.joinLiv
 router.post('/stores/:storeId/calls', protect, validate(v.callRequestSchema), call.requestCall);
 router.post('/fanbox', protect, validate(v.fanboxSchema), fanbox.send);
 router.get('/fanbox/sent', protect, fanbox.listSent);
+// Before /calls/:id so "available" isn't read as a call id.
+router.get('/calls/available', optionalAuth, call.listAvailable);
 router.get('/calls', protect, call.listMyCalls);
 router.get('/calls/:id', protect, call.getCall);
 router.post('/calls/:id/accept', protect, call.accept);

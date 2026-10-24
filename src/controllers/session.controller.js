@@ -1,3 +1,4 @@
+// File: src/controllers/session.controller.js
 const { Session, CreatorProfile, Booking, User } = require('../models');
 const zoomService = require('../services/zoom.service');
 const env = require('../config/env');
@@ -71,6 +72,9 @@ const createSession = catchAsync(async (req, res) => {
     maxParticipants,
     coverImageUrl: coverImageUrl || '',
   });
+
+  // Followers hear about the new live session (in the background).
+  require('../FanittStore/services/meetRoom.service').notifyScheduled(session, { hostUser: req.user });
 
   return new ApiResponse(201, session, 'Session created').send(res);
 });
@@ -219,4 +223,58 @@ const endLive = catchAsync(async (req, res) => {
   return new ApiResponse(200, session, 'Session ended').send(res);
 });
 
-module.exports = { listSessions, getSessionById, createSession, updateSession, cancelSession, getJoinToken, goLive, endLive, uploadBanner };
+// Host's past meetings: ended, cancelled, or the time passed without starting.
+// Each row carries how many people came and the total time they stayed.
+const mySessionHistory = catchAsync(async (req, res) => {
+  const page = Math.max(1, Number(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+
+  const creator = await CreatorProfile.findOne({ user: req.user._id }).select('_id');
+  if (!creator) throw ApiError.notFound('Creator profile not found');
+
+  // "Over" = ended, cancelled, or not live and 6 h past its start (same window the upcoming list uses).
+  const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  const filter = {
+    creator: creator._id,
+    $or: [{ isCompleted: true }, { isCancelled: true }, { isLive: { $ne: true }, scheduledAt: { $lt: cutoff } }],
+  };
+
+  const [sessions, total] = await Promise.all([
+    Session.find(filter).sort({ scheduledAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Session.countDocuments(filter),
+  ]);
+
+  const { Attendance } = require('../FanittStore/services/attendance.service');
+  const rows = sessions.length
+    ? await Attendance.find({ kind: 'meet', ref: { $in: sessions.map((x) => x._id) }, isHost: false }).select('ref totalSeconds').lean()
+    : [];
+  const byRef = new Map();
+  for (const r of rows) {
+    const st = byRef.get(String(r.ref)) || { attended: 0, seconds: 0 };
+    st.attended += 1;
+    st.seconds += r.totalSeconds || 0;
+    byRef.set(String(r.ref), st);
+  }
+
+  const items = sessions.map((x) => {
+    const st = byRef.get(String(x._id));
+    const started = Boolean(x.isCompleted || x.startNotifiedAt || st);
+    return {
+      _id: x._id,
+      title: x.title,
+      coverImageUrl: x.coverImageUrl || '',
+      type: x.type,
+      price: x.price || 0,
+      scheduledAt: x.scheduledAt,
+      durationMinutes: x.durationMinutes,
+      bookedCount: x.bookedCount || 0,
+      attended: st?.attended || 0,
+      watchedSeconds: st?.seconds || 0,
+      status: x.isCancelled ? 'cancelled' : started ? 'ended' : 'missed',
+    };
+  });
+
+  return new ApiResponse(200, { sessions: items, total, page, pages: Math.ceil(total / limit) }, 'Session history fetched').send(res);
+});
+
+module.exports = { listSessions, getSessionById, createSession, updateSession, cancelSession, getJoinToken, goLive, endLive, uploadBanner, mySessionHistory };

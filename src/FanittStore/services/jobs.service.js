@@ -1,3 +1,4 @@
+// File: src/FanittStore/services/jobs.service.js
 const callService = require('./call.service');
 const { LiveStream } = require('../models');
 const { LIVE_STATUS, LIMITS } = require('../constants');
@@ -8,6 +9,7 @@ const log = require('../utils/logger');
 //  - call timeouts / auto-end
 //  - lives left running for over 12 hours are closed
 //  - shop checkouts not paid online in 30 minutes are released
+//  - Virtual Meet reminders 15 minutes before the start
 
 const LIVE_MAX_MS = 12 * 60 * 60 * 1000;
 let timer = null;
@@ -22,6 +24,8 @@ async function tick() {
     await require('./commerce.service').expireUnpaid();
     // Paid communities: expire ended memberships, send renew reminders.
     await require('../../services/communityPaid.service').runSweep();
+    // Virtual Meets: "starts in 15 minutes" to everyone who booked.
+    await require('./meetRoom.service').sendReminders();
     const stale = await LiveStream.find({ status: LIVE_STATUS.LIVE, startedAt: { $lt: new Date(Date.now() - LIVE_MAX_MS) } }).limit(20);
     for (const live of stale) {
       // eslint-disable-next-line no-await-in-loop

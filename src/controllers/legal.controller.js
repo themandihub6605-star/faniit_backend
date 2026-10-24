@@ -1,3 +1,4 @@
+// File: src/controllers/legal.controller.js
 const fs = require('fs');
 const path = require('path');
 const catchAsync = require('../utils/catchAsync');
@@ -11,6 +12,8 @@ const ApiError = require('../utils/apiError');
 const DOCS = {
   'privacy-policy': { file: 'privacy-policy.txt', title: 'Privacy Policy' },
   'terms-of-use': { file: 'terms-of-use.txt', title: 'Terms of Use' },
+  // Shows up on the app and website as soon as this file is added.
+  'refund-policy': { file: 'refund-policy.txt', title: 'Refund & Cancellation Policy' },
 };
 
 const DIR = path.join(__dirname, '..', 'content', 'legal');
@@ -18,7 +21,8 @@ const cache = new Map(); // slug -> { mtimeMs, doc }
 
 /**
  * Turns the plain text into sections:
- *   "1. Introduction"          → a new section (numbers must run 1, 2, 3 …)
+ *   "1. Introduction"          → a new section (numbers must run 1, 2, 3 …
+ *                                and the line must read like a short title)
  *   "ANNEXURE A — Title"       → a new section
  *   "5.1 Something" / "A.1 …"  → a sub-heading inside a section
  *   "- text"                   → bullet
@@ -53,7 +57,10 @@ function parse(raw, fallbackTitle) {
     if (!line) continue;
 
     const section = line.match(/^(\d{1,2})\.\s+(.+)$/);
-    if (section && Number(section[1]) === expected) {
+    // A heading is the next number in order AND reads like a title — short,
+    // not ending in ; : , or . (those are items of a numbered list).
+    const looksLikeTitle = section && section[2].length <= 90 && !/[;:,.]$/.test(section[2]);
+    if (section && Number(section[1]) === expected && looksLikeTitle) {
       current = { id: `s${expected}`, number: section[1], title: section[2], blocks: [] };
       doc.sections.push(current);
       expected += 1;
@@ -87,6 +94,7 @@ function load(slug) {
   const meta = DOCS[slug];
   if (!meta) return null;
   const file = path.join(DIR, meta.file);
+  if (!fs.existsSync(file)) return null; // document not added yet
   const { mtimeMs } = fs.statSync(file);
   const hit = cache.get(slug);
   if (hit && hit.mtimeMs === mtimeMs) return hit.doc;
@@ -97,10 +105,12 @@ function load(slug) {
 
 /** GET /api/legal — which documents exist. */
 const listDocs = catchAsync(async (req, res) => {
-  const docs = Object.keys(DOCS).map((slug) => {
-    const d = load(slug);
-    return { slug, title: d.title, updated: d.updated };
-  });
+  const docs = Object.keys(DOCS)
+    .map((slug) => {
+      const d = load(slug);
+      return d ? { slug, title: d.title, updated: d.updated } : null;
+    })
+    .filter(Boolean);
   return new ApiResponse(200, docs, 'Legal documents').send(res);
 });
 

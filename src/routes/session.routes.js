@@ -1,3 +1,4 @@
+// File: src/routes/session.routes.js
 const express = require('express');
 const router = express.Router();
 
@@ -11,6 +12,7 @@ const {
   goLive,
   endLive,
   uploadBanner,
+  mySessionHistory,
 } = require('../controllers/session.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
@@ -22,6 +24,7 @@ const { ROLES } = require('../constants/enums');
 router.get('/', listSessions);
 router.post('/upload-banner', protect, authorize(ROLES.CREATOR), uploadImage('fanitt/session-banners').single('banner'), uploadBanner);
 router.post('/', protect, authorize(ROLES.CREATOR), validate(createSessionSchema), createSession);
+router.get('/mine/history', protect, authorize(ROLES.CREATOR), mySessionHistory);
 router.get('/:id', getSessionById);
 router.patch('/:id', protect, authorize(ROLES.CREATOR), validate(updateSessionSchema), updateSession);
 router.delete('/:id', protect, authorize(ROLES.CREATOR), cancelSession);

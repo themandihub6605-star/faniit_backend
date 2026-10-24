@@ -1,3 +1,4 @@
+// File: src/app.js
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -10,7 +11,8 @@ const path = require('path');
 const env = require('./config/env');
 const routes = require('./routes');
 const { errorHandler, notFound } = require('./middlewares/error.middleware');
-const { generalLimiter } = require('./middlewares/rateLimiter.middleware');
+const { generalLimiter, paymentLimiter } = require('./middlewares/rateLimiter.middleware');
+const { playIntegrity } = require('./middlewares/playIntegrity.middleware');
 const { handleWebhook } = require('./controllers/payment.controller');
 
 const app = express();
@@ -20,6 +22,7 @@ app.set('trust proxy', 1);
 
 // --- security & core middleware ---
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
+app.disable('x-powered-by');
 app.use(
   cors({
     origin: (origin, callback) => {
@@ -57,7 +60,26 @@ app.post('/api/store/livekit/webhook', express.raw({ type: '*/*', limit: '1mb' }
 
 // --- standard body parsing for everything else ---
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+// --- extra limits on money routes (start a payment, checkout, withdraw) ---
+app.use(
+  [
+    '/api/payments',
+    '/api/subscriptions/checkout',
+    '/api/wallet/withdraw',
+    '/api/milestones',
+    '/api/donations',
+    '/api/bookings',
+    /^\/api\/campaigns\/[^/]+\/(escrow|fund|verify)/,
+    /^\/api\/store\/.*\/checkout/,
+    '/api/store/fanbox',
+  ],
+  (req, res, next) => (req.method === 'GET' ? next() : paymentLimiter(req, res, next))
+);
+
+// --- Google Play Integrity (PLAY_INTEGRITY_MODE = off | log | enforce) ---
+app.use(playIntegrity);
 
 // --- static file serving for local uploads (swap for S3/Cloudinary in production) ---
 app.use(`/${env.uploadDir}`, express.static(path.join(process.cwd(), env.uploadDir)));

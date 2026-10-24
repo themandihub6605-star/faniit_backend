@@ -16,7 +16,10 @@ const listBrands = catchAsync(async (req, res) => {
   if (industry) filter.industry = new RegExp(industry, 'i');
   if (location) filter.location = new RegExp(location, 'i');
   if (search) {
-    filter.$or = [{ companyName: new RegExp(search, 'i') }, { tagline: new RegExp(search, 'i') }];
+    // Escape the text so "c++" or "(" can't break the search.
+    const pattern = new RegExp(String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const users = await User.find({ role: ROLES.BRAND, name: pattern }).select('_id').limit(200).lean();
+    filter.$or = [{ companyName: pattern }, { tagline: pattern }, { slug: pattern }, { industry: pattern }, { user: { $in: users.map((u) => u._id) } }];
   }
 
   // NOTE: the earlier Lite-only-sees-Lite / Pro-sees-everyone visibility

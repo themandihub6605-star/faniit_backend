@@ -1,3 +1,4 @@
+// File: src/models/Session.model.js
 const mongoose = require('mongoose');
 const { SESSION_TYPES } = require('../constants/enums');
 
@@ -27,6 +28,11 @@ const sessionSchema = new mongoose.Schema(
     isLive: { type: Boolean, default: false },
     isCompleted: { type: Boolean, default: false },
     isCancelled: { type: Boolean, default: false },
+
+    // Virtual Meet (in-app) extras
+    roomLocked: { type: Boolean, default: false }, // host locked the meeting: no new guests
+    reminderSentAt: { type: Date, default: null }, // "starts in 15 minutes" sent to booked people
+    startNotifiedAt: { type: Date, default: null }, // "has started" sent (once)
 
     recordingUrl: { type: String, default: '' },
     recordingAvailable: { type: Boolean, default: false },

@@ -1,3 +1,4 @@
+// File: src/FanittStore/services/livekit.service.js
 const { AccessToken, RoomServiceClient, WebhookReceiver } = require('livekit-server-sdk');
 const env = require('../../config/env');
 const ApiError = require('../../utils/apiError');
@@ -111,6 +112,31 @@ async function removeParticipant(roomName, identity) {
   await rooms().removeParticipant(roomName, String(identity));
 }
 
+/**
+ * Mutes one person's mic ('audio') or camera ('video'). Returns how many
+ * tracks were muted. LiveKit allows a server to mute but not to unmute.
+ */
+async function muteTracks(roomName, identity, kind = 'audio') {
+  const type = kind === 'video' ? 1 : 0; // TrackType: 0 = audio, 1 = video
+  let person;
+  try {
+    person = await rooms().getParticipant(roomName, String(identity));
+  } catch {
+    return 0; // not in the room any more
+  }
+  let count = 0;
+  for (const t of person?.tracks || []) {
+    // Screen share is video too (source 3/4) — leave it alone.
+    const isScreen = t.source === 3 || t.source === 4;
+    if (t.type === type && !t.muted && !isScreen) {
+      // eslint-disable-next-line no-await-in-loop
+      await rooms().mutePublishedTrack(roomName, String(identity), t.sid, true);
+      count += 1;
+    }
+  }
+  return count;
+}
+
 let receiver = null;
 /** Verifies and parses a LiveKit webhook. Throws on a bad signature. */
 async function parseWebhook(rawBody, authHeader) {
@@ -119,4 +145,4 @@ async function parseWebhook(rawBody, authHeader) {
   return receiver.receive(rawBody, authHeader);
 }
 
-module.exports = { createToken, ensureRoom, closeRoom, listParticipants, removeParticipant, parseWebhook, isConfigured };
+module.exports = { createToken, ensureRoom, closeRoom, listParticipants, removeParticipant, muteTracks, parseWebhook, isConfigured };

@@ -1,3 +1,4 @@
+// File: src/services/payment.service.js
 const crypto = require('crypto');
 const razorpay = require('../config/razorpay');
 const env = require('../config/env');
@@ -25,13 +26,22 @@ async function createOrder(amount, receipt, notes = {}) {
  * using HMAC SHA256 with the key secret. This MUST pass before we ever
  * mark a booking/escrow as paid.
  */
+/** Constant-time compare so a signature can't be guessed byte by byte. */
+function safeEqual(expected, given) {
+  if (typeof given !== 'string' || !given) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(given);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 function verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature }) {
+  if (!razorpayOrderId || !razorpayPaymentId) return false;
   const expectedSignature = crypto
     .createHmac('sha256', env.razorpay.keySecret)
     .update(`${razorpayOrderId}|${razorpayPaymentId}`)
     .digest('hex');
 
-  return expectedSignature === razorpaySignature;
+  return safeEqual(expectedSignature, razorpaySignature);
 }
 
 /** Razorpay's subscription-checkout signature uses a different concatenation
@@ -43,7 +53,7 @@ function verifySubscriptionSignature({ razorpaySubscriptionId, razorpayPaymentId
     .update(`${razorpayPaymentId}|${razorpaySubscriptionId}`)
     .digest('hex');
 
-  return expectedSignature === razorpaySignature;
+  return safeEqual(expectedSignature, razorpaySignature);
 }
 
 /** Verifies the signature on incoming Razorpay webhook payloads. */
@@ -53,7 +63,7 @@ function verifyWebhookSignature(rawBody, signature) {
     .update(rawBody)
     .digest('hex');
 
-  return expectedSignature === signature;
+  return safeEqual(expectedSignature, signature);
 }
 
 /**
@@ -81,7 +91,11 @@ async function createPayout(fundAccountId, amount, referenceId) {
  * client-sent amount is real. This rejects reused order/payment ids and
  * returns the order as Razorpay recorded it (use its `amount`).
  */
-async function claimOrder({ razorpayOrderId, razorpayPaymentId }) {
+/**
+ * Makes sure a Razorpay payment is real, finished, not used before — and,
+ * when [expectedAmount] (paise) is given, that it paid exactly that much.
+ */
+async function claimOrder({ razorpayOrderId, razorpayPaymentId, expectedAmount }) {
   const { Transaction } = require('../models');
   const used = await Transaction.exists({
     $or: [{ razorpayPaymentId }, { razorpayOrderId }],
@@ -91,6 +105,9 @@ async function claimOrder({ razorpayOrderId, razorpayPaymentId }) {
   const order = await razorpay.orders.fetch(razorpayOrderId);
   if (!order || order.status === 'created') {
     throw ApiError.badRequest('This payment has not been completed');
+  }
+  if (expectedAmount != null && Number(order.amount) !== Number(expectedAmount)) {
+    throw ApiError.badRequest('Payment amount does not match');
   }
   return order;
 }

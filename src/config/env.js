@@ -1,3 +1,4 @@
+// File: src/config/env.js
 require('dotenv').config();
 
 module.exports = {
@@ -76,5 +77,18 @@ module.exports = {
     },
     // Stream (video) — API Tokens page, needs Stream:Edit permission
     streamApiToken: process.env.CLOUDFLARE_STREAM_API_TOKEN,
+  },
+
+  // ---------- Security ----------
+  security: {
+    // Admin login needs a 6-digit code sent to the admin's email.
+    // Turn on only after the admin panel with the code screen is live.
+    adminTwoFactor: String(process.env.ADMIN_2FA || 'false').toLowerCase() === 'true',
+    // Google Play Integrity — checks requests come from the real Play Store app.
+    //   off     = not checked
+    //   log     = checked and logged, nobody is blocked (start here)
+    //   enforce = requests without a valid token are refused (after every user has the new app)
+    playIntegrityMode: (process.env.PLAY_INTEGRITY_MODE || 'off').toLowerCase(),
+    androidPackageName: process.env.ANDROID_PACKAGE_NAME || 'fanitt.comapp.fanittapp',
   },
 };

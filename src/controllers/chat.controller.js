@@ -1,3 +1,4 @@
+// File: src/controllers/chat.controller.js
 const { Conversation, Message, BrandProfile, User, Application } = require('../models');
 const notificationService = require('../services/notification.service');
 const { getIO } = require('../config/socket');
@@ -59,6 +60,10 @@ const startConversation = catchAsync(async (req, res) => {
 
   const pairRoles = [req.user.role, otherUser.role].sort();
   const isCreatorBrandPair = pairRoles[0] === ROLES.BRAND && pairRoles[1] === ROLES.CREATOR;
+  // Creators can't message other creators.
+  if (req.user.role === ROLES.CREATOR && otherUser.role === ROLES.CREATOR) {
+    throw ApiError.forbidden('Creators can’t message other creators.', [], 'CREATOR_TO_CREATOR_BLOCKED');
+  }
   if (isCreatorBrandPair) {
     throw ApiError.forbidden(
       'Creators and brands can only message each other through a campaign proposal — apply to a campaign, or reply to an applicant, to start that conversation.',

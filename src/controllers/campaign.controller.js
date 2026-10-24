@@ -1,3 +1,4 @@
+// File: src/controllers/campaign.controller.js
 const { Campaign, Application, BrandProfile, CreatorProfile, User, SiteSettings } = require('../models');
 const paymentService = require('../services/payment.service');
 const escrowService = require('../services/escrow.service');
@@ -647,7 +648,8 @@ const verifyEscrowPayment = catchAsync(async (req, res) => {
 
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
-  await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
+  // Must have paid exactly the campaign budget.
+  await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId, expectedAmount: campaign.budget });
 
   await escrowService.fundEscrow({
     campaignId: campaign._id,
