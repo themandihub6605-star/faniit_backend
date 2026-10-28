@@ -1,3 +1,4 @@
+// File: src/controllers/post.controller.js
 const mongoose = require('mongoose');
 const { Post, CreatorProfile, BrandProfile } = require('../models');
 const catchAsync = require('../utils/catchAsync');
@@ -5,6 +6,7 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const notificationService = require('../services/notification.service');
 const feed = require('../services/feed.service');
+const blocks = require('../utils/blocks');
 
 // Feed posts and reels by creators and brands.
 //
@@ -39,7 +41,9 @@ function kindFilter(kind) {
 
 /** Lean query with author populated → API shape. */
 async function load(filter, { sort = { createdAt: -1 }, skip = 0, limit = 0 } = {}, userId) {
-  let q = Post.find(filter).sort(sort).populate(feed.POPULATE).lean();
+  // Never show posts from people blocked either way.
+  const hidden = await blocks.hiddenUserIds(userId);
+  let q = Post.find(blocks.withoutAuthors(filter, hidden)).sort(sort).populate(feed.POPULATE).lean();
   if (skip) q = q.skip(skip);
   if (limit) q = q.limit(limit);
   return feed.serializePosts(await q, userId);

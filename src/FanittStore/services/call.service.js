@@ -1,3 +1,4 @@
+// File: src/FanittStore/services/call.service.js
 const ApiError = require('../../utils/apiError');
 const { Store, CallSession, StoreOrder } = require('../models');
 const { CALL_STATUS, CALL_TYPE, STORE_STATUS, ORDER_ITEM, ORDER_STATUS, LIMITS } = require('../constants');
@@ -18,6 +19,10 @@ const log = require('../utils/logger');
 //   settle   → creator credited for billed minutes, the rest back to the
 //              caller's wallet. Declined / missed / cancelled = full refund.
 //   jobs     → ring timeout, connect timeout, auto-end when prepaid time is up
+
+const FREE_SECONDS = 15;
+// Online for this long without a call → we switch the creator offline.
+const ONLINE_MAX_MS = 12 * 60 * 60 * 1000;
 
 const OPEN_STATUSES = [CALL_STATUS.AWAITING_PAYMENT, CALL_STATUS.REQUESTED, CALL_STATUS.ACTIVE];
 
@@ -324,7 +329,30 @@ async function runTimeouts(now = new Date()) {
   const missed = await CallSession.find({ status: CALL_STATUS.REQUESTED, requestedAt: { $lt: ringCutoff } }).limit(50);
   for (const call of missed) {
     // eslint-disable-next-line no-await-in-loop
-    await closeCall(call, CALL_STATUS.MISSED, { endedBy: 'system', reason: 'not_answered' });
+    const closed = await closeCall(call, CALL_STATUS.MISSED, { endedBy: 'system', reason: 'not_answered' });
+    // eslint-disable-next-line no-await-in-loop
+    if (closed) await onMissed(call);
+  }
+
+  // Online for hours with nobody answering → offline, so fans don't pay
+  // and wait for a creator who isn't there.
+  const stale = await Store.find({ 'calls.online': true, 'calls.lastOnlineAt': { $lt: new Date(now.getTime() - ONLINE_MAX_MS) } })
+    .select('_id user name')
+    .limit(50);
+  for (const store of stale) {
+    // eslint-disable-next-line no-await-in-loop
+    const off = await Store.updateOne({ _id: store._id, 'calls.online': true }, { $set: { 'calls.online': false } });
+    if (!off.modifiedCount) continue;
+    // eslint-disable-next-line no-await-in-loop
+    await safeNotify({
+      userId: store.user,
+      type: 'store_call',
+      title: 'You’re offline for calls now',
+      message: 'You were online for 12 hours, so we switched you off. Go online again whenever you’re free.',
+      relatedModel: 'Store',
+      relatedId: store._id,
+    });
+    log.info('call.auto_offline', { storeId: String(store._id), reason: 'online_too_long' });
   }
 
   const neverConnected = await CallSession.find({ status: CALL_STATUS.ACTIVE, connectedAt: null, acceptedAt: { $lt: connectCutoff } }).limit(50);
@@ -346,6 +374,30 @@ async function runTimeouts(now = new Date()) {
     { status: CALL_STATUS.AWAITING_PAYMENT, createdAt: { $lt: paymentCutoff } },
     { $set: { status: CALL_STATUS.CANCELLED, endReason: 'payment_not_completed', endedAt: now, settledAt: now } }
   );
+}
+
+/**
+ * A call rang out: the creator hears who tried to reach them, and goes
+ * offline so the next fan doesn't pay and wait for nothing.
+ */
+async function onMissed(call) {
+  try {
+    const { User } = require('../../models');
+    const caller = await User.findById(call.caller).select('name').lean();
+    const off = await Store.updateOne({ _id: call.store, 'calls.online': true }, { $set: { 'calls.online': false } });
+    await safeNotify({
+      userId: call.host,
+      fromUser: call.caller,
+      type: 'store_call',
+      title: `Missed call from ${caller?.name || 'a fan'}`,
+      message: `${call.type === CALL_TYPE.VIDEO ? 'Video' : 'Audio'} · ${call.prepaidMinutes} min${call.prepaidAmount > 0 ? ` · ${formatRupees(call.prepaidAmount)}` : ''}.${off.modifiedCount ? ' We set you offline — go online again when you’re free.' : ''}`,
+      relatedModel: 'CallSession',
+      relatedId: call._id,
+    });
+    if (off.modifiedCount) log.info('call.auto_offline', { storeId: String(call.store), reason: 'missed_call' });
+  } catch (err) {
+    log.warn('call.missed_notify_failed', { callId: String(call._id), message: err?.message });
+  }
 }
 
 /** LiveKit says the call room closed (everyone left). */

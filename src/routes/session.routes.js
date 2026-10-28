@@ -13,6 +13,8 @@ const {
   endLive,
   uploadBanner,
   mySessionHistory,
+  myUpcomingSessions,
+  sessionBookings,
 } = require('../controllers/session.controller');
 const { protect } = require('../middlewares/auth.middleware');
 const { authorize } = require('../middlewares/role.middleware');
@@ -25,10 +27,12 @@ router.get('/', listSessions);
 router.post('/upload-banner', protect, authorize(ROLES.CREATOR), uploadImage('fanitt/session-banners').single('banner'), uploadBanner);
 router.post('/', protect, authorize(ROLES.CREATOR), validate(createSessionSchema), createSession);
 router.get('/mine/history', protect, authorize(ROLES.CREATOR), mySessionHistory);
+router.get('/mine/upcoming', protect, authorize(ROLES.CREATOR), myUpcomingSessions);
 router.get('/:id', getSessionById);
 router.patch('/:id', protect, authorize(ROLES.CREATOR), validate(updateSessionSchema), updateSession);
 router.delete('/:id', protect, authorize(ROLES.CREATOR), cancelSession);
 router.get('/:id/join-token', protect, getJoinToken);
+router.get('/:id/bookings', protect, authorize(ROLES.CREATOR), sessionBookings);
 router.patch('/:id/go-live', protect, authorize(ROLES.CREATOR), goLive);
 router.patch('/:id/end-live', protect, authorize(ROLES.CREATOR), endLive);
 

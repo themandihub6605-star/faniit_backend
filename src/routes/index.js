@@ -9,7 +9,19 @@ router.use(monitor.tracker);
 // Public webhook routes (no auth) — keep at top
 router.use('/whatsapp', require('./whatsapp.routes'));
 
+// Website (fanitt.com) login with an email code.
+router.use('/auth/web', require('./webAuth.routes'));
+// Sign in with Apple (iPhone app).
+router.use('/auth/apple', require('./appleAuth.routes'));
 router.use('/auth', require('./auth.routes'));
+
+// Blocked people can't follow each other — checked here, then the normal
+// creator/brand follow route runs.
+const { protect } = require('../middlewares/auth.middleware');
+const { followGuard } = require('../controllers/block.controller');
+router.post('/creators/:id/follow', protect, followGuard('creator'));
+router.post('/brands/:id/follow', protect, followGuard('brand'));
+
 router.use('/users', require('./user.routes'));
 router.use('/creators', require('./creator.routes'));
 router.use('/sessions', require('./session.routes'));
@@ -29,6 +41,9 @@ router.use('/communities', require('./community.routes'));
 router.use('/chat', require('./chat.routes'));
 router.use('/gifts', require('./gift.routes'));
 router.use('/posts', require('./post.routes'));
+router.use('/reports', require('./report.routes'));
+router.use('/blocks', require('./block.routes'));
+router.use('/terms', require('./terms.routes'));
 router.use('/stories', require('./story.routes'));
 router.use('/wallet', require('./wallet.routes'));
 // Before '/admin' so admin.routes doesn't catch them first.

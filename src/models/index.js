@@ -1,3 +1,4 @@
+// File: src/models/index.js
 module.exports = {
   User: require('./User.model'),
   PendingSignup: require('./PendingSignup.model'),
@@ -31,4 +32,7 @@ module.exports = {
   UserSubscription: require('./UserSubscription.model'),
   Milestone: require('./Milestone'),
   Dispute: require('./Dispute'),
+  Report: require('./Report.model'),
+  Block: require('./Block.model'),
+  TermsAcceptance: require('./TermsAcceptance.model'),
 };

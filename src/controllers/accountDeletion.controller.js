@@ -1,11 +1,17 @@
+// File: src/controllers/accountDeletion.controller.js
 const { User } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiError = require('../utils/apiError');
 const ApiResponse = require('../utils/apiResponse');
 const { alertUser } = require('../services/alert.service');
+const deletion = require('../services/accountDeletion.service');
+
+// Requests not reviewed within DELETION_GRACE_DAYS (default 7) are deleted
+// automatically — Apple / Google need deletions to actually happen.
+deletion.start();
 
 // Admin review of "Delete account" requests from the app / website.
-//   pending  → account locked, waiting for admin
+//   pending  → account locked, waiting for admin (auto-deleted after 7 days)
 //   approved → personal data removed, email freed for a new signup
 //   rejected → account restored, user can log in again
 
@@ -58,47 +64,12 @@ const listDeletions = catchAsync(async (req, res) => {
  * all personal data is removed and the email is renamed, so the same
  * person can create a brand-new account with their email / Google. */
 const approveDeletion = catchAsync(async (req, res) => {
-  const user = await User.findById(req.params.id).select('name email isActive deletionStatus');
+  const user = await User.findById(req.params.id).select('isActive deletionStatus');
   if (!user) throw ApiError.notFound('User not found');
   if (user.deletionStatus === 'approved') throw ApiError.badRequest('This account is already deleted');
   if (user.isActive !== false) throw ApiError.badRequest('This user has not asked to delete their account');
 
-  const now = new Date();
-  await User.updateOne(
-    { _id: user._id },
-    {
-      $set: {
-        deletedEmail: user.email,
-        email: `deleted.${user._id}.${now.getTime()}@deleted.fanitt.invalid`,
-        name: 'Deleted user',
-        phone: '',
-        avatarUrl: '',
-        googleId: null,
-        pushTokens: [],
-        isActive: false,
-        deletionStatus: 'approved',
-        deletionReviewedAt: now,
-        deletionNote: String(req.body?.note || '').trim().slice(0, 500),
-      },
-      $unset: { passwordResetToken: 1, passwordResetExpires: 1 },
-    }
-  );
-
-  // Email only — the account is gone, so no in-app notification.
-  alertUser({
-    userId: user._id,
-    inApp: false,
-    title: 'Your Fanitt account has been deleted',
-    message: 'As you requested, your Fanitt account and personal details have been deleted.',
-    email: {
-      to: user.email,
-      name: user.name,
-      body: 'As you requested, your Fanitt account and personal details have been deleted. You can create a new account with this email anytime.',
-      ctaUrl: 'https://fanitt.com/signup',
-      ctaLabel: 'Create a new account',
-    },
-  });
-
+  await deletion.deleteAccountNow(user._id, { note: req.body?.note });
   return new ApiResponse(200, { _id: user._id, deletionStatus: 'approved' }, 'Account deleted. The email can now be used for a new account.').send(res);
 });
 

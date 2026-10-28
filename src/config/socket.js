@@ -1,9 +1,11 @@
+// File: src/config/socket.js
 const { Server } = require('socket.io');
 const { verifyAccessToken } = require('../utils/generateToken');
 const env = require('./env');
 const { User, Conversation, Message } = require('../models');
 const notificationService = require('../services/notification.service');
 const communityService = require('../services/community.service');
+const blocks = require('../utils/blocks');
 
 let io = null;
 
@@ -56,6 +58,11 @@ function initSocket(httpServer) {
         if (!conversation) throw new Error('Conversation not found');
         if (!conversation.participants.some((p) => String(p) === socket.userId)) {
           throw new Error('You are not part of this conversation');
+        }
+        for (const p of conversation.participants) {
+          if (String(p) !== socket.userId && (await blocks.isBlockedBetween(socket.userId, p))) {
+            throw new Error('You can’t message this account.');
+          }
         }
 
         const message = await Message.create({

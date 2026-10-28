@@ -1,3 +1,4 @@
+// File: src/FanittStore/controllers/call.controller.js
 const mongoose = require('mongoose');
 const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
@@ -7,7 +8,8 @@ const { CALL_STATUS, STORE_STATUS } = require('../constants');
 const storeService = require('../services/store.service');
 const callService = require('../services/call.service');
 const { order: serializeOrder, publicStore } = require('../utils/serialize');
-const { pageParams } = require('../utils/text');
+const { pageParams, escapeRegex } = require('../utils/text');
+const { CreatorProfile, Category, User } = require('../../models');
 
 // 1-to-1 calls — creator settings (/me/calls) and both sides of a call (/calls).
 
@@ -109,25 +111,102 @@ const getCall = catchAsync(async (req, res) => {
 });
 
 /**
- * GET /api/store/calls/available?page= — creators taking 1-to-1 calls
- * (calls switched on, store live and open). Online first, then the most
- * recently online. Each store comes with the same call info as its page
- * (online / busy / audio + video rate per minute, 0 = free).
+ * GET /api/store/calls/available?page=&category=&search=&online=1
+ * Experts taking 1-to-1 calls (calls switched on, store live and open).
+ * Online first, then the most recently online. Each store comes with the
+ * same call info as its page (online / busy / audio + video rate per minute,
+ * 0 = free) and the expert's category (from their creator profile).
+ *
+ *   category — a Category id; only experts in that category
+ *   search   — store name contains this text
+ *   online=1 — only experts online right now
+ *
+ * Page 1 also returns `categories`: the categories that have experts taking
+ * calls (with how many), for the filter chips.
  */
 const listAvailable = catchAsync(async (req, res) => {
   const { page, limit, skip } = pageParams(req.query);
-  const filter = { status: STORE_STATUS.ACTIVE, isOpen: true, 'calls.enabled': true };
+  const base = { status: STORE_STATUS.ACTIVE, isOpen: true, 'calls.enabled': true };
+  // Don't offer people a call with themselves.
+  if (req.user) base.user = { $ne: req.user._id };
+
+  const filter = { ...base };
+  const and = [];
+  if (req.query.online === '1' || req.query.online === 'true') filter['calls.online'] = true;
+  // Search the creator's own name (and their store name, as a fallback).
+  const search = String(req.query.search || '').trim().slice(0, 60);
+  if (search) {
+    const pattern = { $regex: escapeRegex(search), $options: 'i' };
+    const people = await User.find({ name: pattern }).select('_id').limit(300);
+    and.push({ $or: [{ user: { $in: people.map((u) => u._id) } }, { name: pattern }] });
+  }
+  const categoryId = String(req.query.category || '');
+  if (categoryId && mongoose.isValidObjectId(categoryId)) {
+    const users = await CreatorProfile.find({ category: categoryId }).distinct('user');
+    and.push({ user: { $in: users } });
+  }
+  if (and.length) filter.$and = and;
+
   const [stores, total] = await Promise.all([
     Store.find(filter).sort({ 'calls.online': -1, 'calls.lastOnlineAt': -1, 'stats.orders': -1 }).skip(skip).limit(limit),
     Store.countDocuments(filter),
   ]);
+
+  // The person behind each store — fans call the creator, not the shop:
+  // name + photo (User) and title, bio, rating, category (CreatorProfile).
+  const userIds = stores.map((s) => s.user);
+  const [profiles, people] = await Promise.all([
+    CreatorProfile.find({ user: { $in: userIds } })
+      .select('user slug title bio category languages averageRating reviewCount followerCount verificationStatus')
+      .populate('category', 'label icon'),
+    User.find({ _id: { $in: userIds } }).select('name avatarUrl'),
+  ]);
+  const profileOf = new Map(profiles.map((p) => [String(p.user), p]));
+  const personOf = new Map(people.map((u) => [String(u._id), u]));
+
   const items = await Promise.all(
-    stores
-      // Don't offer people a call with themselves.
-      .filter((s) => !(req.user && String(s.user) === String(req.user._id)))
-      .map(async (s) => ({ ...publicStore(s), calls: await callService.publicCallInfo(s) }))
+    stores.map(async (s) => {
+      const p = profileOf.get(String(s.user));
+      const u = personOf.get(String(s.user));
+      return {
+        ...publicStore(s),
+        calls: await callService.publicCallInfo(s),
+        category: p?.category ? { _id: p.category._id, label: p.category.label, icon: p.category.icon || '' } : null,
+        creator: {
+          userId: s.user,
+          name: u?.name || s.name,
+          avatarUrl: u?.avatarUrl || '',
+          slug: p?.slug || '',
+          title: p?.title || '',
+          bio: p?.bio || '',
+          languages: p?.languages || [],
+          rating: p?.averageRating || 0,
+          reviews: p?.reviewCount || 0,
+          followers: p?.followerCount || 0,
+          verified: p?.verificationStatus === 'verified',
+        },
+      };
+    })
   );
-  return new ApiResponse(200, { stores: items, total, page, pages: Math.ceil(total / limit) }, 'Creators taking calls').send(res);
+
+  // Filter chips: categories that have experts taking calls (page 1 only).
+  let categories;
+  if (page === 1) {
+    const allUsers = await Store.find(base).distinct('user');
+    // Plain group + find (no $lookup) so it also runs on FerretDB.
+    const rows = await CreatorProfile.aggregate([
+      { $match: { user: { $in: allUsers }, category: { $ne: null } } },
+      { $group: { _id: '$category', count: { $sum: 1 } } },
+    ]);
+    const cats = await Category.find({ _id: { $in: rows.map((r) => r._id) } }).select('label icon');
+    const label = new Map(cats.map((c) => [String(c._id), c]));
+    categories = rows
+      .filter((r) => label.has(String(r._id)))
+      .map((r) => ({ _id: r._id, label: label.get(String(r._id)).label, icon: label.get(String(r._id)).icon || '', count: r.count }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+  }
+
+  return new ApiResponse(200, { stores: items, total, page, pages: Math.ceil(total / limit), categories }, 'Experts taking calls').send(res);
 });
 
 /** POST /api/store/stores/:storeId/calls { type, minutes, note?, payWith? } */

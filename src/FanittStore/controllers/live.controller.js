@@ -1,3 +1,4 @@
+// File: src/FanittStore/controllers/live.controller.js
 const mongoose = require('mongoose');
 const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
@@ -53,6 +54,7 @@ function ownerLive(live) {
     stats: live.stats,
     cancelledReason: live.cancelledReason,
     endedByAdmin: live.endedByAdmin,
+    missed: Boolean(live.missed),
   });
 }
 
@@ -97,6 +99,9 @@ async function applyAudience(live, body, hostId) {
 /** POST /api/store/me/lives */
 const createLive = catchAsync(async (req, res) => {
   const store = await storeService.requireActiveStore(req.user._id);
+  if (req.body.scheduledAt && new Date(req.body.scheduledAt).getTime() < Date.now() + 60 * 1000) {
+    throw ApiError.badRequest('Pick a time in the future');
+  }
   const live = new LiveStream({
     store: store._id,
     host: req.user._id,
@@ -111,6 +116,8 @@ const createLive = catchAsync(async (req, res) => {
   await applyAudience(live, { ...req.body, visibility: req.body.visibility || LIVE_VISIBILITY.PUBLIC }, req.user._id);
   await live.save();
   log.info('live.created', { liveId: String(live._id), scheduled: Boolean(live.scheduledAt) });
+  // Scheduled → followers who can watch it hear about it (background).
+  if (live.scheduledAt) liveService.notifyScheduled(live, req.user);
   return new ApiResponse(201, ownerLive(live), 'Live created').send(res);
 });
 
@@ -121,12 +128,50 @@ async function loadOwnLive(userId, id) {
   return live;
 }
 
-/** GET /api/store/me/lives?status= */
+/**
+ * GET /api/store/me/lives?tab=upcoming|past (or ?status=) — the host's lives,
+ * each with tickets sold so far and the latest buyers (for the avatars).
+ */
 const listMyLives = catchAsync(async (req, res) => {
   const filter = { host: req.user._id };
-  if (Object.values(LIVE_STATUS).includes(req.query.status)) filter.status = req.query.status;
+  if (req.query.tab === 'upcoming') filter.status = { $in: [LIVE_STATUS.LIVE, LIVE_STATUS.SCHEDULED] };
+  else if (req.query.tab === 'past') filter.status = { $in: [LIVE_STATUS.ENDED, LIVE_STATUS.CANCELLED] };
+  else if (Object.values(LIVE_STATUS).includes(req.query.status)) filter.status = req.query.status;
   const lives = await LiveStream.find(filter).sort({ createdAt: -1 }).limit(100);
-  return new ApiResponse(200, lives.map(ownerLive), 'Lives fetched').send(res);
+
+  const ids = lives.map((l) => l._id);
+  const orders = ids.length
+    ? await StoreOrder.find({ itemId: { $in: ids }, itemType: ORDER_ITEM.LIVE_STREAM, status: ORDER_STATUS.PAID })
+        .select('itemId buyer paidAt')
+        .sort({ paidAt: -1 })
+        .lean()
+    : [];
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const byLive = new Map();
+  const wanted = new Set();
+  for (const o of orders) {
+    const key = String(o.itemId);
+    const st = byLive.get(key) || { count: 0, today: 0, recent: [] };
+    st.count += 1;
+    if (o.paidAt && new Date(o.paidAt).getTime() > dayAgo) st.today += 1;
+    if (st.recent.length < 4) {
+      st.recent.push(String(o.buyer));
+      wanted.add(String(o.buyer));
+    }
+    byLive.set(key, st);
+  }
+  const users = wanted.size ? await User.find({ _id: { $in: [...wanted] } }).select('name avatarUrl').lean() : [];
+  const userMap = new Map(users.map((u) => [String(u._id), u]));
+
+  const items = lives.map((l) => {
+    const st = byLive.get(String(l._id)) || { count: 0, today: 0, recent: [] };
+    return {
+      ...ownerLive(l),
+      ticketsToday: st.today,
+      recentBuyers: st.recent.map((id) => ({ name: userMap.get(id)?.name || 'Fanitt user', avatarUrl: userMap.get(id)?.avatarUrl || '' })),
+    };
+  });
+  return new ApiResponse(200, items, 'Lives fetched').send(res);
 });
 
 /** GET /api/store/me/lives/:id — with ticket buyers. */
@@ -149,12 +194,20 @@ const updateLive = catchAsync(async (req, res) => {
   ['title', 'description', 'price', 'chatEnabled', 'fanboxEnabled'].forEach((f) => {
     if (req.body[f] !== undefined) live[f] = req.body[f];
   });
-  if (req.body.scheduledAt !== undefined) live.scheduledAt = req.body.scheduledAt ? new Date(req.body.scheduledAt) : null;
+  let moved = false;
+  if (req.body.scheduledAt !== undefined) {
+    const next = req.body.scheduledAt ? new Date(req.body.scheduledAt) : null;
+    if (next && next.getTime() < Date.now() + 60 * 1000) throw ApiError.badRequest('Pick a time in the future');
+    moved = String(next?.getTime() || '') !== String(live.scheduledAt ? new Date(live.scheduledAt).getTime() : '');
+    live.scheduledAt = next;
+    if (moved) live.reminderSentAt = null;
+  }
   if (['visibility', 'privateMode', 'communityId', 'allowedUserIds'].some((f) => req.body[f] !== undefined)) {
     await applyAudience(live, req.body, req.user._id);
   }
   await live.save();
-  return new ApiResponse(200, ownerLive(live), 'Live updated').send(res);
+  if (moved && live.scheduledAt) liveService.notifyRescheduled(live); // ticket holders (background)
+  return new ApiResponse(200, ownerLive(live), moved ? 'Live moved — ticket holders notified' : 'Live updated').send(res);
 });
 
 /** POST /api/store/me/lives/:id/cover (multipart "image") */
@@ -296,8 +349,29 @@ function sortOpenLives(lives) {
  * communities, hand-picked, invite already used, or their own).
  */
 const discoverLives = catchAsync(async (req, res) => {
-  const limit = Math.min(30, Math.max(1, parseInt(req.query.limit, 10) || 20));
+  const limit = Math.min(60, Math.max(1, parseInt(req.query.limit, 10) || 20));
   const activeStores = await Store.find({ status: STORE_STATUS.ACTIVE }).distinct('_id');
+
+  // ?following=1 — only creators I follow who are live right now (feed stories).
+  if (req.query.following === '1') {
+    if (!req.user) return new ApiResponse(200, { lives: [] }, 'Lives fetched').send(res);
+    const CreatorProfile = mongoose.models.CreatorProfile;
+    const followed = CreatorProfile ? await CreatorProfile.find({ followers: req.user._id }).distinct('user') : [];
+    if (!followed.length) return new ApiResponse(200, { lives: [] }, 'Lives fetched').send(res);
+    const uid = req.user._id;
+    const communities = await myCommunityIds(uid);
+    const canWatch = [
+      { visibility: LIVE_VISIBILITY.PUBLIC },
+      { visibility: LIVE_VISIBILITY.PRIVATE, privateMode: LIVE_PRIVATE_MODE.SELECTED, allowedUsers: uid },
+      { visibility: LIVE_VISIBILITY.PRIVATE, privateMode: LIVE_PRIVATE_MODE.INVITE, invitedUsers: uid },
+    ];
+    if (communities.length) canWatch.push({ visibility: LIVE_VISIBILITY.PRIVATE, privateMode: LIVE_PRIVATE_MODE.COMMUNITY, community: { $in: communities } });
+    const running = await LiveStream.find({ store: { $in: activeStores }, status: LIVE_STATUS.LIVE, host: { $in: followed }, $or: canWatch })
+      .sort({ 'stats.currentViewers': -1 })
+      .limit(limit);
+    return new ApiResponse(200, { lives: await enrichLives(running, req.user) }, 'Lives fetched').send(res);
+  }
+
   const audience = [{ visibility: LIVE_VISIBILITY.PUBLIC }];
   if (req.user) {
     const uid = req.user._id;

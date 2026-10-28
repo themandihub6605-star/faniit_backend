@@ -1,3 +1,4 @@
+// File: src/FanittStore/models/DigitalProduct.model.js
 const mongoose = require('mongoose');
 const { PRODUCT_STATUS, PRODUCT_CATEGORIES } = require('../constants');
 
@@ -11,6 +12,9 @@ const productFileSchema = new mongoose.Schema({
   size: { type: Number, required: true }, // bytes
   mimeType: { type: String, required: true },
   addedAt: { type: Date, default: Date.now },
+  // Removed by the creator after people bought the product: hidden from
+  // new buyers, still downloadable by people who bought before this date.
+  archivedAt: { type: Date, default: null },
 });
 
 const digitalProductSchema = new mongoose.Schema(

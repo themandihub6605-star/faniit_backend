@@ -6,6 +6,9 @@ const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { ROLES } = require('../constants/enums');
+const blocks = require('../utils/blocks');
+
+const blockedError = () => ApiError.forbidden('You can’t message this account.', [], 'BLOCKED');
 
 /** Chat should always show a *public identity* — a brand's company name and
  * logo, never the personal name/photo they signed up with (which is often
@@ -33,8 +36,12 @@ const listConversations = catchAsync(async (req, res) => {
     .populate('participants', 'name avatarUrl role')
     .sort({ lastMessageAt: -1 });
 
+  // Chats with people blocked either way are hidden.
+  const hidden = new Set((await blocks.hiddenUserIds(req.user._id)).map(String));
+  const visible = conversations.filter((c) => !c.participants.some((p) => p && hidden.has(String(p._id))));
+
   const withUnread = await Promise.all(
-    conversations.map(async (c) => ({
+    visible.map(async (c) => ({
       ...c.toObject(),
       participants: await withBrandDisplayIdentity(c.participants),
       unreadCount: c.unreadCounts?.get(String(req.user._id)) || 0,
@@ -57,6 +64,7 @@ const startConversation = catchAsync(async (req, res) => {
 
   const otherUser = await User.findById(userId).select('role');
   if (!otherUser) throw ApiError.notFound('User not found');
+  if (await blocks.isBlockedBetween(req.user._id, userId)) throw blockedError();
 
   const pairRoles = [req.user.role, otherUser.role].sort();
   const isCreatorBrandPair = pairRoles[0] === ROLES.BRAND && pairRoles[1] === ROLES.CREATOR;
@@ -169,6 +177,9 @@ const sendMessage = catchAsync(async (req, res) => {
   if (!conversation) throw ApiError.notFound('Conversation not found');
   if (!conversation.participants.some((p) => p.equals(req.user._id))) {
     throw ApiError.forbidden('You are not part of this conversation');
+  }
+  for (const p of conversation.participants) {
+    if (!p.equals(req.user._id) && (await blocks.isBlockedBetween(req.user._id, p))) throw blockedError();
   }
 
   const message = await Message.create({ conversation: conversation._id, sender: req.user._id, text: text.trim() });

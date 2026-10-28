@@ -1,3 +1,4 @@
+// File: src/FanittStore/controllers/shop.controller.js
 const mongoose = require('mongoose');
 const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
@@ -223,13 +224,24 @@ const getLibrary = catchAsync(async (req, res) => {
 
   const items = orders.map((o) => {
     const p = byId.get(String(o.itemId));
+    let shaped = p ? serializeProduct(p) : null;
+    if (p && shaped) {
+      // Files the creator removed after this purchase stay in the buyer's library.
+      const kept = p.files
+        .filter((f) => f.archivedAt && o.paidAt && new Date(o.paidAt) < new Date(f.archivedAt))
+        .map((f) => ({ _id: f._id, name: f.name, size: f.size, mimeType: f.mimeType }));
+      if (kept.length) {
+        const files = [...shaped.files, ...kept];
+        shaped = { ...shaped, files, fileCount: files.length, totalSize: files.reduce((sum, f) => sum + (f.size || 0), 0) };
+      }
+    }
     return {
       orderId: o._id,
       purchasedAt: o.paidAt,
       invoiceNumber: o.invoiceNumber,
       store: o.store,
       // Snapshot title/cover stay even if the creator later deleted the product.
-      product: p ? serializeProduct(p) : { _id: o.itemId, title: o.itemTitle, coverUrl: o.itemCoverUrl, files: [], fileCount: 0 },
+      product: shaped || { _id: o.itemId, title: o.itemTitle, coverUrl: o.itemCoverUrl, files: [], fileCount: 0 },
       available: Boolean(p) && p.status !== PRODUCT_STATUS.REMOVED,
     };
   });
@@ -249,6 +261,11 @@ const downloadFile = catchAsync(async (req, res) => {
   }
   const file = product.files.id(req.params.fileId);
   if (!file) throw ApiError.notFound('File not found');
+  // A removed file: only people who bought before it was removed.
+  if (file.archivedAt && !isOwner) {
+    const bought = await StoreOrder.exists({ buyer: req.user._id, itemId: product._id, status: ORDER_STATUS.PAID, paidAt: { $lt: file.archivedAt } });
+    if (!bought) throw ApiError.notFound('File not found');
+  }
 
   const link = await storage.presignDownload(file.key, file.name);
   return new ApiResponse(200, { ...link, fileName: file.name, size: file.size, mimeType: file.mimeType }, 'Download link').send(res);

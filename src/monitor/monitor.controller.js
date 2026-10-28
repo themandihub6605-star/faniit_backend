@@ -1,3 +1,4 @@
+// File: src/monitor/monitor.controller.js
 const mongoose = require('mongoose');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
@@ -26,7 +27,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const TZ = 'Asia/Kolkata';
 const PAID_TX = ['success', 'released', 'in_escrow'];
 // Money coming INTO the platform (commission/payout rows are internal splits).
-const INBOUND_TX = ['session_payment', 'donation', 'gift', 'campaign_escrow_deposit', 'campaign_posting_fee', 'subscription_payment', 'extra_proposal_fee', 'store_sale'];
+const INBOUND_TX = ['session_payment', 'donation', 'gift', 'campaign_escrow_deposit', 'campaign_posting_fee', 'subscription_payment', 'extra_proposal_fee'];
 
 function clampDays(v, fallback = 30) {
   const n = Number(v);
@@ -113,9 +114,10 @@ async function attentionList(payoutsAmount) {
   const Dispute = M('Dispute');
   const Review = M('Review');
   const Store = M('Store');
+  const Report = M('Report');
   const payoutsPendingAmount = payoutsAmount === undefined ? await sum(Withdrawal, { status: { $in: ['initiated', 'processing'] } }, 'amount') : payoutsAmount;
   // Things waiting for an admin, most urgent first.
-  const [pendingCreators, pendingBrands, wInitiated, wProcessing, deletions, campaignReview, disputes, disputedCampaigns, flagged, storeKyc, issues24h] = await Promise.all([
+  const [pendingCreators, pendingBrands, wInitiated, wProcessing, deletions, campaignReview, disputes, disputedCampaigns, flagged, storeKyc, issues24h, reports] = await Promise.all([
     count(CreatorProfile, { verificationStatus: 'pending' }),
     count(BrandProfile, { verificationStatus: 'pending' }),
     count(Withdrawal, { status: 'initiated' }),
@@ -127,16 +129,18 @@ async function attentionList(payoutsAmount) {
     count(Review, { isFlagged: true, isHidden: { $ne: true } }),
     count(Store, { status: 'pending_review' }),
     count(ApiIssue, { lastSeenAt: { $gte: new Date(now - DAY_MS) }, resolvedAt: null }),
+    count(Report, { status: 'pending' }),
   ]);
 
   return [
+    { key: 'reports', label: 'Reported content to review', count: reports, href: '/reports', tone: 'rose' },
     { key: 'verifications', label: 'Profiles waiting for approval', count: (pendingCreators ?? 0) + (pendingBrands ?? 0), href: '/verifications', tone: 'amber' },
     { key: 'withdrawals', label: 'Withdrawal requests to pay', count: (wInitiated ?? 0) + (wProcessing ?? 0), href: '/withdrawals', tone: 'rose', amount: payoutsPendingAmount },
     { key: 'campaigns', label: 'Campaigns waiting for review', count: campaignReview, href: '/campaigns', tone: 'sky' },
     { key: 'disputes', label: 'Open payment disputes', count: (disputes ?? 0) + (disputedCampaigns ?? 0), href: '/escrow-disputes', tone: 'rose' },
     { key: 'deletions', label: 'Account deletion requests', count: deletions, href: '/account-deletions', tone: 'gray' },
     { key: 'store-kyc', label: 'Stores waiting for KYC review', count: storeKyc, href: '/store/stores', tone: 'amber' },
-    { key: 'reviews', label: 'Flagged reviews', count: flagged, href: '/reviews?visibility=flagged', tone: 'amber' },
+    { key: 'reviews', label: 'Flagged reviews', count: flagged, href: '/moderation', tone: 'amber' },
     { key: 'api', label: 'API problems in the last 24h', count: issues24h, href: '/system', tone: 'rose' },
   ].filter((a) => a.count !== null);
 }
@@ -220,8 +224,6 @@ const overview = catchAsync(async (req, res) => {
     shopOrders,
     shopOrdersPrev,
     shopRevenue,
-    gmvAllTime,
-    commissionAllTime,
   ] = await Promise.all([
     count(User, {}),
     count(User, cur),
@@ -267,8 +269,6 @@ const overview = catchAsync(async (req, res) => {
     count(ShopOrder, { ...cur, ...shopValid }),
     count(ShopOrder, { ...prev, ...shopValid }),
     sum(ShopOrder, { ...cur, ...shopValid }, 'total'),
-    sum(Transaction, paidIn, 'amount'),
-    sum(Transaction, okTx, 'platformCommission'),
   ]);
 
   const attention = await attentionList(payoutsPendingAmount);
@@ -318,7 +318,6 @@ const overview = catchAsync(async (req, res) => {
         refunds,
         inEscrow: escrow,
         pendingPayouts: payoutsPendingAmount,
-        allTime: { moneyIn: gmvAllTime, commission: commissionAllTime },
       },
       store: {
         activeStores: storesActive,
@@ -440,7 +439,7 @@ const SOURCES = {
       title: `${r.fromUser?.name || 'Someone'} rated ${r.toUser?.name || 'a creator'} ${r.rating}★`,
       meta: r.comment ? r.comment.slice(0, 90) : '',
       actor: { name: r.fromUser?.name, avatarUrl: r.fromUser?.avatarUrl, id: r.fromUser?._id },
-      href: '/reviews',
+      href: '/moderation',
       tone: r.isFlagged ? 'rose' : 'amber',
     }),
   },

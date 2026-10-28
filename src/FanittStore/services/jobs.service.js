@@ -10,6 +10,9 @@ const log = require('../utils/logger');
 //  - lives left running for over 12 hours are closed
 //  - shop checkouts not paid online in 30 minutes are released
 //  - Virtual Meet reminders 15 minutes before the start
+//  - Virtual Meets left running past their end + 1 h are closed
+//  - Stream Live reminders, and scheduled lives never started are cancelled + refunded
+//  - affiliate links checked weekly; broken ones flagged for the creator
 
 const LIVE_MAX_MS = 12 * 60 * 60 * 1000;
 let timer = null;
@@ -26,6 +29,14 @@ async function tick() {
     await require('../../services/communityPaid.service').runSweep();
     // Virtual Meets: "starts in 15 minutes" to everyone who booked.
     await require('./meetRoom.service').sendReminders();
+    // Virtual Meets the host never ended → closed after end + 1 h.
+    await require('./meetRoom.service').autoEndOverdue();
+    // Stream Live: "starts in 15 min" to ticket holders + host,
+    // and scheduled lives never started → cancelled + refunded after 1 h.
+    await require('./live.service').sendReminders();
+    await require('./live.service').expireMissed();
+    // Affiliate links: a few checked per run, each about once a week.
+    await require('./affiliateLinks.service').checkSome();
     const stale = await LiveStream.find({ status: LIVE_STATUS.LIVE, startedAt: { $lt: new Date(Date.now() - LIVE_MAX_MS) } }).limit(20);
     for (const live of stale) {
       // eslint-disable-next-line no-await-in-loop

@@ -1,3 +1,4 @@
+// File: src/services/communityPaid.service.js
 const { Community, CommunityMembership, CreatorProfile, User } = require('../models');
 const CommunitySettings = require('../models/CommunitySettings.model');
 const subscriptionService = require('./subscription.service');
@@ -213,6 +214,7 @@ async function grantFromOrder(order) {
   if (wasPending) inc.pendingRequestCount = -1;
   await Community.updateOne({ _id: community._id }, { $inc: inc });
 
+  const buyer = await User.findById(order.buyer).select('name').lean();
   const until = paidUntil ? ` till ${paidUntil.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}` : ' for life';
   await Promise.all([
     alertUser({
@@ -228,8 +230,8 @@ async function grantFromOrder(order) {
       userId: community.createdBy,
       fromUser: order.buyer,
       type: 'store_sale',
-      title: `New paid member — ${rupees(order.amount)}`,
-      message: `Someone joined ${community.name} (${PLAN_LABEL[plan]}).`,
+      title: wasActive ? `Membership renewed — ${rupees(order.amount)}` : `New paid member — ${rupees(order.amount)}`,
+      message: `${buyer?.name || 'Someone'} ${wasActive ? 'renewed' : 'joined'} ${community.name} (${PLAN_LABEL[plan]}).`,
       relatedModel: 'Community',
       relatedId: community._id,
     }),

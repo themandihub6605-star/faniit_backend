@@ -53,8 +53,14 @@ async function handleLiveKitWebhook(req, res) {
           await LiveStream.updateOne({ _id: live._id, 'stats.currentViewers': { $gt: 0 } }, { $inc: { 'stats.currentViewers': -1 } });
         }
       }
+      // The room closed (host left and it stayed empty) while the live was
+      // still marked running → end it, so it leaves every Live list.
       if (live && event.event === 'room_finished' && live.status === LIVE_STATUS.LIVE) {
-        await LiveStream.updateOne({ _id: live._id, status: LIVE_STATUS.LIVE }, { $set: { 'stats.currentViewers': 0 } });
+        const ended = await LiveStream.updateOne(
+          { _id: live._id, status: LIVE_STATUS.LIVE },
+          { $set: { status: LIVE_STATUS.ENDED, endedAt: new Date(), 'stats.currentViewers': 0 } }
+        );
+        if (ended.modifiedCount) log.info('live.auto_ended_room_closed', { liveId: String(live._id) });
       }
       // Attendance for the host's "who watched" list.
       if (live) {

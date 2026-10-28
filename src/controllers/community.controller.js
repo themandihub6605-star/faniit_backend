@@ -1,3 +1,4 @@
+// File: src/controllers/community.controller.js
 const { Community, CommunityMembership, CommunityPost, CommunityComment, CommunityMessage, User } = require('../models');
 const generateSlug = require('../utils/slugify');
 const catchAsync = require('../utils/catchAsync');
@@ -6,6 +7,7 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const notificationService = require('../services/notification.service');
 const cs = require('../services/community.service');
+const blocks = require('../utils/blocks');
 const paid = require('../services/communityPaid.service');
 const CommunitySettings = require('../models/CommunitySettings.model');
 
@@ -367,6 +369,23 @@ const deleteCommunity = catchAsync(async (req, res) => {
   if (req.user.role !== 'admin') {
     const membership = await cs.getMembership(community._id, req.user._id);
     cs.assertOwner(membership);
+    // People who paid and still have time left would lose it without a
+    // refund — the owner can't delete until that time runs out.
+    const now = new Date();
+    const paidLeft = await CommunityMembership.countDocuments({
+      community: community._id,
+      status: 'active',
+      access: 'paid',
+      $or: [{ plan: 'lifetime' }, { paidUntil: { $gt: now } }],
+    });
+    if (paidLeft > 0) {
+      throw new ApiError(
+        409,
+        `${paidLeft} ${paidLeft === 1 ? 'member has' : 'members have'} paid time left. Turn off paid plans so no one new pays, and delete once their plans end — or contact Fanitt support to close it with refunds.`,
+        [],
+        'COMMUNITY_HAS_PAID_MEMBERS'
+      );
+    }
   }
   await Promise.all([
     CommunityMembership.deleteMany({ community: community._id }),
@@ -444,6 +463,21 @@ const toggleMembership = catchAsync(async (req, res) => {
   await CommunityMembership.create({ community: community._id, user: req.user._id });
   community.memberCount += 1;
   await community.save();
+
+  // The owner hears about new members (skipped for very big communities).
+  if (community.memberCount <= 1000 && String(community.createdBy) !== String(req.user._id)) {
+    notificationService
+      .notify({
+        userId: community.createdBy,
+        fromUser: req.user._id,
+        type: 'community_join_request',
+        title: `New member in ${community.name} 🎉`,
+        message: `${req.user.name} joined · ${community.memberCount} members now.`,
+        relatedModel: 'Community',
+        relatedId: community._id,
+      })
+      .catch(() => {});
+  }
   return new ApiResponse(200, { joined: true, status: 'active' }, 'Joined community').send(res);
 });
 
@@ -581,6 +615,33 @@ const manageMember = catchAsync(async (req, res) => {
       await target.deleteOne();
       break;
     }
+    case 'make_owner': {
+      // Hands the community over; the old owner stays on as a moderator.
+      requireOwnerFor();
+      if (target.status !== 'active') throw ApiError.badRequest('Only active members can become the owner');
+      if (community.isPaid) {
+        const targetUser = await User.findById(target.user).select('role');
+        await paid.assertCanSell(targetUser || { _id: target.user });
+      }
+      target.role = 'admin';
+      await target.save();
+      actor.role = 'moderator';
+      await actor.save();
+      community.createdBy = target.user;
+      await community.save();
+      notificationService
+        .notify({
+          userId: target.user,
+          fromUser: req.user._id,
+          type: 'community_join_approved',
+          title: `You now own ${community.name} 👑`,
+          message: `${req.user.name} made you the owner. You can manage everything from My store → Community.`,
+          relatedModel: 'Community',
+          relatedId: community._id,
+        })
+        .catch(() => {});
+      break;
+    }
     default:
       throw ApiError.badRequest('Unknown action');
   }
@@ -597,7 +658,10 @@ const listPosts = catchAsync(async (req, res) => {
   // Paid community, not a member: only the free posts, plus how many are locked.
   if (cs.isPreviewOnly(community, membership)) {
     const [free, total, locked] = await Promise.all([
-      CommunityPost.find({ community: community._id, isFree: true }).populate('author', cs.AUTHOR_FIELDS).sort({ createdAt: -1 }).limit(MAX_FREE_POSTS),
+      CommunityPost.find(blocks.withoutAuthors({ community: community._id, isFree: true }, await blocks.hiddenUserIds(req.user?._id)))
+        .populate('author', cs.AUTHOR_FIELDS)
+        .sort({ createdAt: -1 })
+        .limit(MAX_FREE_POSTS),
       CommunityPost.countDocuments({ community: community._id }),
       lockedTeasers(community._id),
     ]);
@@ -623,8 +687,10 @@ const listPosts = catchAsync(async (req, res) => {
 
   const { page, limit, skip } = pageParams(req.query, 15, 30);
   const sortBy = req.query.sort === 'top' ? { likeCount: -1, createdAt: -1 } : { isPinned: -1, pinnedAt: -1, createdAt: -1 };
-  const filter = { community: community._id };
+  let filter = { community: community._id };
   if (req.query.announcements === 'true') filter.isAnnouncement = true;
+  // Hide posts from people blocked either way.
+  filter = blocks.withoutAuthors(filter, await blocks.hiddenUserIds(req.user?._id));
 
   const [posts, total, freeCount] = await Promise.all([
     CommunityPost.find(filter).populate('author', cs.AUTHOR_FIELDS).sort(sortBy).skip(skip).limit(limit),
@@ -869,12 +935,13 @@ const listComments = catchAsync(async (req, res) => {
   cs.assertCanViewPost(community, membership, post);
 
   const { page, limit, skip } = pageParams(req.query, 30, 50);
-  const filter = { post: post._id, parentComment: null };
+  const hidden = await blocks.hiddenUserIds(req.user?._id);
+  const filter = blocks.withoutAuthors({ post: post._id, parentComment: null }, hidden);
   const [roots, total] = await Promise.all([
     CommunityComment.find(filter).populate('author', cs.AUTHOR_FIELDS).sort({ createdAt: 1 }).skip(skip).limit(limit),
     CommunityComment.countDocuments(filter),
   ]);
-  const replies = await CommunityComment.find({ parentComment: { $in: roots.map((r) => r._id) } })
+  const replies = await CommunityComment.find(blocks.withoutAuthors({ parentComment: { $in: roots.map((r) => r._id) } }, hidden))
     .populate('author', cs.AUTHOR_FIELDS)
     .sort({ createdAt: 1 });
 
@@ -989,8 +1056,9 @@ const getChat = catchAsync(async (req, res) => {
     const before = new Date(req.query.before);
     if (!Number.isNaN(before.getTime())) filter.createdAt = { $lt: before };
   }
+  const hidden = await blocks.hiddenUserIds(req.user._id);
 
-  const messages = await CommunityMessage.find(filter)
+  const messages = await CommunityMessage.find(blocks.withoutAuthors(filter, hidden, 'sender'))
     .populate('sender', cs.AUTHOR_FIELDS)
     .sort({ createdAt: -1 })
     .limit(limit + 1);

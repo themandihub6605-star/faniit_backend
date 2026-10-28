@@ -464,41 +464,69 @@ const getSuggestedCampaigns = catchAsync(async (req, res) => {
     .sort({ createdAt: -1 })
     .limit(200);
 
-  const creatorSkills = (creator.skills || []).map((s) => s.toLowerCase());
-  const creatorLocation = (creator.location || '').toLowerCase();
+  // Lower-case words, so "Fashion & Lifestyle" and "fashion" can meet.
+  const norm = (v) => String(v || '').toLowerCase().trim();
+  const words = (v) => norm(v).split(/[^a-z0-9]+/).filter((w) => w.length > 2);
+  const sameTag = (a, b) => {
+    const x = norm(a);
+    const y = norm(b);
+    if (!x || !y) return false;
+    if (x === y || x.includes(y) || y.includes(x)) return true;
+    const wy = new Set(words(y));
+    return words(x).some((w) => wy.has(w));
+  };
+
+  const creatorSkills = (creator.skills || []).map(norm).filter(Boolean);
+  const creatorCategoryLabel = creator.category?.label || '';
+  const creatorLocation = norm(creator.location);
+  const creatorCity = creatorLocation.split(',')[0].trim();
 
   const scored = candidates
     .filter((c) => c.applicantLimit == null || c.applicantCount < c.applicantLimit)
     .map((c) => {
       let score = 0;
       const reasons = [];
+      let profileMatch = false; // category, skills or city — the real reasons
 
       if (creator.category && c.category && String(c.category._id) === String(creator.category._id)) {
         score += 40;
+        profileMatch = true;
         reasons.push(`Matches your category (${c.category.label})`);
       }
 
-      if (c.locationType === LOCATION_TYPE.PAN_INDIA) {
-        score += 10;
-      } else if (creatorLocation && c.location && c.location.toLowerCase().includes(creatorLocation)) {
-        score += 20;
-        reasons.push('Matches your location');
-      }
-
-      const matchedSkills = (c.influencerCategories || []).filter((tag) => creatorSkills.includes(tag.toLowerCase()));
+      // Campaign tags vs the creator's skills and category name.
+      const tags = c.influencerCategories || [];
+      const matchedSkills = tags.filter((tag) => creatorSkills.some((skill) => sameTag(tag, skill)));
       if (matchedSkills.length > 0) {
-        score += Math.min(20, matchedSkills.length * 5);
-        reasons.push(`Matches ${matchedSkills.length} of your skill${matchedSkills.length === 1 ? '' : 's'}`);
+        score += Math.min(30, matchedSkills.length * 10);
+        profileMatch = true;
+        reasons.push(matchedSkills.length === 1 ? `Matches your skill (${matchedSkills[0]})` : `Matches ${matchedSkills.length} of your skills`);
+      } else if (!reasons.length && creatorCategoryLabel && tags.some((tag) => sameTag(tag, creatorCategoryLabel))) {
+        score += 25;
+        profileMatch = true;
+        reasons.push(`Looking for ${creatorCategoryLabel} creators`);
       }
 
-      if (c.minFollowers != null) {
+      const campaignPlace = norm(c.locationValue || c.location);
+      if (c.locationType === LOCATION_TYPE.PAN_INDIA) {
+        score += 5; // open to everyone — a small boost, never a match by itself
+      } else if (creatorCity && campaignPlace && (campaignPlace.includes(creatorCity) || creatorLocation.includes(campaignPlace))) {
+        score += 20;
+        profileMatch = true;
+        reasons.push(`In your city (${c.locationValue || c.location})`);
+      }
+
+      if (c.minFollowers != null && profileMatch) {
         reasons.push('You meet the follower requirement');
       }
 
-      return { campaign: c, matchScore: score, matchReasons: reasons };
+      return { campaign: c, matchScore: score, matchReasons: reasons, profileMatch };
     })
+    // Only campaigns that actually match the profile — no random fill-ins.
+    .filter((x) => x.profileMatch)
     .sort((a, b) => b.matchScore - a.matchScore || new Date(b.campaign.createdAt) - new Date(a.campaign.createdAt))
-    .slice(0, 10);
+    .slice(0, 10)
+    .map(({ profileMatch, ...rest }) => rest);
 
   return new ApiResponse(200, scored, 'Suggested campaigns fetched').send(res);
 });

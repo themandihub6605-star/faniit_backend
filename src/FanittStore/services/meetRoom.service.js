@@ -157,6 +157,62 @@ async function sendReminders() {
   }
 }
 
+/**
+ * Background job: a meet the host left without pressing End stays "live"
+ * forever. Close any that are past their end + 1 h grace (and anything
+ * live for over 6 hours) so they leave the Live lists.
+ */
+async function autoEndOverdue() {
+  const { Session } = models();
+  if (!Session) return;
+  const now = Date.now();
+  const candidates = await Session.find({ isLive: true, isCompleted: { $ne: true } })
+    .select('scheduledAt durationMinutes')
+    .limit(50)
+    .lean();
+  for (const s of candidates) {
+    const overdue = now > endsAt(s).getTime() + GRACE_AFTER_MS;
+    if (!overdue) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const claim = await Session.updateOne({ _id: s._id, isLive: true }, { $set: { isLive: false, isCompleted: true, roomLocked: false } });
+    if (!claim.modifiedCount) continue;
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await livekit.closeRoom(roomName(s._id));
+      // eslint-disable-next-line no-await-in-loop
+      await attendance.closeAll({ kind: 'meet', ref: s._id });
+    } catch (err) {
+      log.warn('meet.auto_end_cleanup_failed', { sessionId: String(s._id), message: err?.message });
+    }
+    log.info('meet.auto_ended', { sessionId: String(s._id) });
+  }
+}
+
+/**
+ * Someone booked → tell the host: "Rahul booked your session".
+ * Background, never throws.
+ */
+async function notifyHostBooked(session, bookerUser, { paid = 0 } = {}) {
+  try {
+    const hostId = hostUserId(session);
+    if (!hostId || hostId === String(bookerUser?._id)) return;
+    const booked = (await bookedUserIds(session._id)).length;
+    const seats = session.maxParticipants ? `${booked}/${session.maxParticipants}` : `${booked}`;
+    const money = paid > 0 ? ` · ₹${Math.round(paid / 100).toLocaleString('en-IN')} earned` : '';
+    await safeNotify({
+      userId: hostId,
+      fromUser: bookerUser?._id || null,
+      type: 'session_booking',
+      title: `${bookerUser?.name || 'Someone'} booked your session 🎉`,
+      message: `"${session.title}" · ${whenText(session.scheduledAt)} · ${seats} booked${money}`,
+      relatedModel: 'Session',
+      relatedId: session._id,
+    });
+  } catch (err) {
+    log.warn('meet.host_booked_notify_failed', { sessionId: String(session?._id), message: err?.message });
+  }
+}
+
 /** What this user can do with this meet. */
 async function access(session, user) {
   const now = Date.now();
@@ -310,6 +366,9 @@ module.exports = {
   notifyScheduled,
   notifyStarted,
   sendReminders,
+  autoEndOverdue,
+  notifyHostBooked,
+  whenText,
   hostMute,
   hostRemove,
   hostLock,

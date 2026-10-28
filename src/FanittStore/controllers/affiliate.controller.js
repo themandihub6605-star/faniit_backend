@@ -1,3 +1,4 @@
+// File: src/FanittStore/controllers/affiliate.controller.js
 const mongoose = require('mongoose');
 const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
@@ -29,11 +30,13 @@ function publicProduct(p) {
     merchant: p.merchant,
     category: p.category,
     goPath: `/api/store/go/${p._id}`,
+    // Shown on the card so fans know it's an affiliate (paid) link.
+    isAffiliate: true,
   };
 }
 
 function ownerProduct(p) {
-  return { ...publicProduct(p), url: p.url, status: p.status, removedReason: p.removedReason, clicks: p.clicks, lastClickedAt: p.lastClickedAt, sortOrder: p.sortOrder, createdAt: p.createdAt };
+  return { ...publicProduct(p), url: p.url, status: p.status, removedReason: p.removedReason, clicks: p.clicks, lastClickedAt: p.lastClickedAt, sortOrder: p.sortOrder, createdAt: p.createdAt, linkBroken: Boolean(p.linkBroken), linkCheckedAt: p.linkCheckedAt };
 }
 
 async function loadOwn(Model, userId, id, label) {
@@ -82,7 +85,15 @@ const createProduct = catchAsync(async (req, res) => {
 const updateProduct = catchAsync(async (req, res) => {
   const product = await loadOwn(AffiliateProduct, req.user._id, req.params.id, 'Product');
   if (product.status === AFFILIATE_STATUS.REMOVED) throw ApiError.forbidden(`Removed by Fanitt: ${product.removedReason}`);
-  if (req.body.url !== undefined) await linkPreview.assertPublicUrl(req.body.url);
+  if (req.body.url !== undefined) {
+    await linkPreview.assertPublicUrl(req.body.url);
+    // A new link gets checked again from scratch.
+    if (req.body.url !== product.url) {
+      product.linkBroken = false;
+      product.linkFailures = 0;
+      product.linkCheckedAt = null;
+    }
+  }
   ['title', 'description', 'imageUrl', 'price', 'merchant', 'category', 'url', 'sortOrder'].forEach((f) => {
     if (req.body[f] !== undefined) product[f] = req.body[f];
   });

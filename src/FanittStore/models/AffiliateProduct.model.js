@@ -1,3 +1,4 @@
+// File: src/FanittStore/models/AffiliateProduct.model.js
 const mongoose = require('mongoose');
 const { AFFILIATE_STATUS } = require('../constants');
 
@@ -23,6 +24,11 @@ const affiliateProductSchema = new mongoose.Schema(
 
     clicks: { type: Number, default: 0 },
     lastClickedAt: { type: Date, default: null },
+
+    // Weekly link check: the shop page is gone (404/410) or the site is down.
+    linkCheckedAt: { type: Date, default: null },
+    linkFailures: { type: Number, default: 0 },
+    linkBroken: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

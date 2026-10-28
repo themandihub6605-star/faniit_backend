@@ -4,6 +4,7 @@ const router = express.Router();
 
 const {
   register,
+  sendSignupOtp,
   login,
   verifyAdminCode,
   refresh,
@@ -18,8 +19,10 @@ const {
 const { protect } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
 const { authLimiter, loginPerEmailLimiter, passwordResetLimiter, otpLimiter, refreshLimiter } = require('../middlewares/rateLimiter.middleware');
-const { registerSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
+const { registerSchema, sendSignupOtpSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
 
+// Sign-up step 1: email a 6-digit code. Step 2 (/register) needs that code.
+router.post('/register/send-otp', otpLimiter, validate(sendSignupOtpSchema), sendSignupOtp);
 router.post('/register', authLimiter, validate(registerSchema), register);
 router.post('/login', authLimiter, loginPerEmailLimiter, validate(loginSchema), login);
 router.post('/admin/verify-code', otpLimiter, verifyAdminCode);

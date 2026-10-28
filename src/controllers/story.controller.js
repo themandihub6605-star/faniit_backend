@@ -1,9 +1,11 @@
+// File: src/controllers/story.controller.js
 const mongoose = require('mongoose');
 const { Story, User, CreatorProfile, BrandProfile } = require('../models');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const feed = require('../services/feed.service');
+const blocks = require('../utils/blocks');
 
 // 24-hour stories by creators and brands (one photo or video each).
 //
@@ -79,7 +81,8 @@ const createStory = catchAsync(async (req, res) => {
 /** Rings for the feed. Mine first, then accounts I follow with unseen stories, then the rest. */
 const getStoryFeed = catchAsync(async (req, res) => {
   const userId = req.user?._id;
-  const stories = await Story.find(active()).sort({ createdAt: -1 }).limit(600).populate(feed.POPULATE).lean();
+  const hidden = await blocks.hiddenUserIds(userId);
+  const stories = await Story.find(blocks.withoutAuthors(active(), hidden)).sort({ createdAt: -1 }).limit(600).populate(feed.POPULATE).lean();
   const groups = await groupByAuthor(stories, userId);
   const rank = (g) => (g.isMine ? 0 : g.author.isFollowing && g.hasUnseen ? 1 : g.hasUnseen ? 2 : g.author.isFollowing ? 3 : 4);
   groups.sort((a, b) => rank(a) - rank(b) || b.latestAt - a.latestAt);
@@ -95,6 +98,7 @@ const getMyStories = catchAsync(async (req, res) => {
 /** One author's active stories — `:id` is their user id. */
 const getUserStories = catchAsync(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) return new ApiResponse(200, null, 'Stories fetched').send(res);
+  if (await blocks.isBlockedBetween(req.user?._id, req.params.id)) return new ApiResponse(200, null, 'Stories fetched').send(res);
   const stories = await Story.find({ author: req.params.id, ...active() }).sort({ createdAt: 1 }).populate(feed.POPULATE).lean();
   const [group] = await groupByAuthor(stories, req.user?._id);
   return new ApiResponse(200, group || null, 'Stories fetched').send(res);

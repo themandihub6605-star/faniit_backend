@@ -1,3 +1,4 @@
+// File: src/FanittStore/utils/serialize.js
 const { mask } = require('./text');
 
 // Shapes documents for API responses so private fields never leak.
@@ -63,7 +64,9 @@ function ownerStore(store) {
 
 function product(p, { owner = false } = {}) {
   if (!p) return null;
-  const files = (p.files || []).map((f) => ({ _id: f._id, name: f.name, size: f.size, mimeType: f.mimeType }));
+  // Files the creator removed after sales stay for earlier buyers only
+  // (see the library) — never shown on the product itself.
+  const files = (p.files || []).filter((f) => !f.archivedAt).map((f) => ({ _id: f._id, name: f.name, size: f.size, mimeType: f.mimeType }));
   const base = {
     _id: p._id,
     store: p.store,

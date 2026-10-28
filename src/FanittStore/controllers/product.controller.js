@@ -1,3 +1,4 @@
+// File: src/FanittStore/controllers/product.controller.js
 const mongoose = require('mongoose');
 const catchAsync = require('../../utils/catchAsync');
 const ApiResponse = require('../../utils/apiResponse');
@@ -25,6 +26,8 @@ async function loadOwnProduct(userId, productId) {
   }
   return product;
 }
+
+const activeFiles = (product) => product.files.filter((f) => !f.archivedAt);
 
 const send = (res, product, message, status = 200) => new ApiResponse(status, serializeProduct(product, { owner: true }), message).send(res);
 
@@ -84,7 +87,7 @@ const uploadCover = catchAsync(async (req, res) => {
  */
 const requestFileUpload = catchAsync(async (req, res) => {
   const product = await loadOwnProduct(req.user._id, req.params.id);
-  if (product.files.length >= LIMITS.FILES_PER_PRODUCT) {
+  if (activeFiles(product).length >= LIMITS.FILES_PER_PRODUCT) {
     throw ApiError.badRequest(`A product can have up to ${LIMITS.FILES_PER_PRODUCT} files`);
   }
   const key = storage.buildKey('products', String(product._id), req.body.fileName);
@@ -106,7 +109,7 @@ const confirmFile = catchAsync(async (req, res) => {
   const { key, fileName } = req.body;
   if (!key.startsWith(`store/products/${product._id}/`)) throw ApiError.badRequest('This upload does not belong to this product');
   if (product.files.some((f) => f.key === key)) return send(res, product, 'File already added');
-  if (product.files.length >= LIMITS.FILES_PER_PRODUCT) {
+  if (activeFiles(product).length >= LIMITS.FILES_PER_PRODUCT) {
     throw ApiError.badRequest(`A product can have up to ${LIMITS.FILES_PER_PRODUCT} files`);
   }
 
@@ -125,23 +128,59 @@ const confirmFile = catchAsync(async (req, res) => {
   product.files.push({ key, name: fileName, size: info.size, mimeType });
   await product.save();
   log.info('product.file_added', { productId: String(product._id), size: info.size, mimeType });
+  // Already sold → everyone who bought it hears about the new file.
+  if (product.status === PRODUCT_STATUS.PUBLISHED && product.salesCount > 0) notifyBuyers(product, fileName);
   return send(res, product, 'File added', 201);
 });
+
+/** "New file in <product>" to every buyer (background, never throws). */
+async function notifyBuyers(product, fileName) {
+  try {
+    const { safeNotify } = require('../services/notify.service');
+    const orders = await StoreOrder.find({ itemId: product._id, status: ORDER_STATUS.PAID }).select('_id buyer').lean();
+    const seen = new Set();
+    for (let i = 0; i < orders.length; i += 50) {
+      // eslint-disable-next-line no-await-in-loop
+      await Promise.all(
+        orders.slice(i, i + 50).map((o) => {
+          if (seen.has(String(o.buyer))) return null;
+          seen.add(String(o.buyer));
+          return safeNotify({
+            userId: o.buyer,
+            type: 'store_order',
+            title: `New file in ${product.title} 📦`,
+            message: `"${fileName}" was added — download it from your library.`,
+            relatedModel: 'StoreOrder',
+            relatedId: o._id,
+          });
+        })
+      );
+    }
+    log.info('product.buyers_notified', { productId: String(product._id), buyers: seen.size });
+  } catch (err) {
+    log.warn('product.buyers_notify_failed', { productId: String(product._id), message: err?.message });
+  }
+}
 
 /** DELETE /api/store/me/products/:id/files/:fileId */
 const removeFile = catchAsync(async (req, res) => {
   const product = await loadOwnProduct(req.user._id, req.params.id);
   const file = product.files.id(req.params.fileId);
-  if (!file) throw ApiError.notFound('File not found');
-  if (product.status === PRODUCT_STATUS.PUBLISHED && product.files.length === 1) {
+  if (!file || file.archivedAt) throw ApiError.notFound('File not found');
+  if (product.status === PRODUCT_STATUS.PUBLISHED && activeFiles(product).length === 1) {
     throw ApiError.badRequest('A published product needs at least one file — add another first, or unpublish it');
+  }
+  if (product.salesCount > 0) {
+    // People bought it with this file — they keep it in their library;
+    // new buyers won't get it.
+    file.archivedAt = new Date();
+    await product.save();
+    return send(res, product, 'File removed — earlier buyers keep it');
   }
   const { key } = file;
   file.deleteOne();
   await product.save();
-  // Buyers keep access while it's published, so only delete from storage
-  // if nobody has bought it yet.
-  if (product.salesCount === 0) storage.remove(key);
+  storage.remove(key);
   return send(res, product, 'File removed');
 });
 
@@ -161,7 +200,7 @@ const publishProduct = catchAsync(async (req, res) => {
   const missing = [];
   if (!product.coverUrl) missing.push('a cover image');
   if (!product.description || product.description.trim().length < 20) missing.push('a description (20+ characters)');
-  if (product.files.length === 0) missing.push('at least one file');
+  if (activeFiles(product).length === 0) missing.push('at least one file');
   if (missing.length) throw ApiError.badRequest(`Add ${missing.join(', ')} before publishing`, [], 'PRODUCT_INCOMPLETE');
 
   product.status = PRODUCT_STATUS.PUBLISHED;

@@ -9,6 +9,15 @@ const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
 const { ROLES, SESSION_TYPES, BOOKING_STATUS } = require('../constants/enums');
 
+// A session that never started is "over" once its planned end + 1 h has
+// passed (the same window the meeting room allows the host to start in).
+const GRACE_MS = 60 * 60 * 1000;
+const MIN_OVER_MS = 15 * 60 * 1000 + GRACE_MS; // shortest session + grace
+const endsAtMs = (s) => new Date(s.scheduledAt).getTime() + (s.durationMinutes || 60) * 60 * 1000;
+const isOver = (s) => Date.now() > endsAtMs(s) + GRACE_MS;
+const istText = (d) => new Date(d).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+const BOOKED = [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.COMPLETED];
+
 const uploadBanner = catchAsync(async (req, res) => {
   if (!req.file) throw ApiError.badRequest('No file uploaded');
 
@@ -112,7 +121,7 @@ const updateSession = catchAsync(async (req, res) => {
   if (rescheduled) {
     try {
       const bookings = await Booking.find({ session: session._id, status: BOOKING_STATUS.CONFIRMED }).select('user');
-      const when = session.scheduledAt.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+      const when = istText(session.scheduledAt);
       await Promise.all(
         bookings.map((b) =>
           notificationService
@@ -147,12 +156,31 @@ const cancelSession = catchAsync(async (req, res) => {
   const session = await Session.findById(req.params.id).populate({ path: 'creator', populate: { path: 'user', select: 'name' } });
   if (!session) throw ApiError.notFound('Session not found');
   if (!session.creator.user._id.equals(req.user._id)) throw ApiError.forbidden('You do not own this session');
+  if (session.isCompleted) throw ApiError.badRequest('This session is already over');
+  if (session.isCancelled) return new ApiResponse(200, null, 'Session cancelled').send(res);
+  if (session.isLive) throw ApiError.badRequest('End the live session first');
 
   session.isCancelled = true;
   await session.save();
 
   try {
     const bookings = await Booking.find({ session: session._id, status: BOOKING_STATUS.CONFIRMED }).populate('user', 'name email');
+    // In-app + push for everyone who booked (best-effort).
+    await Promise.all(
+      bookings.map((b) =>
+        notificationService
+          .notify({
+            userId: b.user?._id || b.user,
+            fromUser: req.user._id,
+            type: 'session_reminder',
+            title: 'Session cancelled',
+            message: `"${session.title}" by ${session.creator.user.name} on ${istText(session.scheduledAt)} was cancelled.`,
+            relatedModel: 'Session',
+            relatedId: session._id,
+          })
+          .catch(() => {})
+      )
+    );
     bookings.forEach((booking) => {
       if (booking.user?.email) {
         sendSessionCancelledEmail({
@@ -212,14 +240,9 @@ const goLive = catchAsync(async (req, res) => {
 });
 
 const endLive = catchAsync(async (req, res) => {
-  const session = await Session.findById(req.params.id).populate('creator');
-  if (!session) throw ApiError.notFound('Session not found');
-  if (!session.creator.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this session');
-
-  session.isLive = false;
-  session.isCompleted = true;
-  await session.save();
-
+  // Same as ending from the meeting room: closes the LiveKit room and the
+  // attendance log, not just the flag.
+  const session = await require('../FanittStore/services/meetRoom.service').end(req.user, req.params.id);
   return new ApiResponse(200, session, 'Session ended').send(res);
 });
 
@@ -232,17 +255,18 @@ const mySessionHistory = catchAsync(async (req, res) => {
   const creator = await CreatorProfile.findOne({ user: req.user._id }).select('_id');
   if (!creator) throw ApiError.notFound('Creator profile not found');
 
-  // "Over" = ended, cancelled, or not live and 6 h past its start (same window the upcoming list uses).
-  const cutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  // "Over" = ended, cancelled, or never started and past its end + 1 h
+  // grace (the same rule the upcoming list uses, so nothing falls between).
   const filter = {
     creator: creator._id,
-    $or: [{ isCompleted: true }, { isCancelled: true }, { isLive: { $ne: true }, scheduledAt: { $lt: cutoff } }],
+    $or: [{ isCompleted: true }, { isCancelled: true }, { isLive: { $ne: true }, scheduledAt: { $lt: new Date(Date.now() - MIN_OVER_MS) } }],
   };
 
-  const [sessions, total] = await Promise.all([
+  const [found, total] = await Promise.all([
     Session.find(filter).sort({ scheduledAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     Session.countDocuments(filter),
   ]);
+  const sessions = found.filter((x) => x.isCompleted || x.isCancelled || isOver(x));
 
   const { Attendance } = require('../FanittStore/services/attendance.service');
   const rows = sessions.length
@@ -277,4 +301,103 @@ const mySessionHistory = catchAsync(async (req, res) => {
   return new ApiResponse(200, { sessions: items, total, page, pages: Math.ceil(total / limit) }, 'Session history fetched').send(res);
 });
 
-module.exports = { listSessions, getSessionById, createSession, updateSession, cancelSession, getJoinToken, goLive, endLive, uploadBanner, mySessionHistory };
+// GET /api/sessions/mine/upcoming — the host's sessions that are live or can
+// still start, with how many booked, what they earned and the latest bookers.
+const myUpcomingSessions = catchAsync(async (req, res) => {
+  const creator = await CreatorProfile.findOne({ user: req.user._id }).select('_id');
+  if (!creator) throw ApiError.notFound('Creator profile not found');
+
+  const found = await Session.find({
+    creator: creator._id,
+    isCancelled: { $ne: true },
+    isCompleted: { $ne: true },
+    $or: [{ isLive: true }, { scheduledAt: { $gte: new Date(Date.now() - 4 * 60 * 60 * 1000) } }],
+  })
+    .populate('category', 'label icon')
+    .sort({ scheduledAt: 1 })
+    .limit(100)
+    .lean();
+  const sessions = found.filter((s) => s.isLive || !isOver(s));
+  sessions.sort((a, b) => Number(Boolean(b.isLive)) - Number(Boolean(a.isLive)));
+
+  const ids = sessions.map((s) => s._id);
+  const bookings = ids.length
+    ? await Booking.find({ session: { $in: ids }, status: { $in: BOOKED } }).select('session user amountPaid createdAt').sort({ createdAt: -1 }).lean()
+    : [];
+
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const stats = new Map();
+  const wanted = new Set();
+  for (const b of bookings) {
+    const key = String(b.session);
+    const st = stats.get(key) || { count: 0, earned: 0, today: 0, recent: [] };
+    st.count += 1;
+    st.earned += b.amountPaid || 0;
+    if (new Date(b.createdAt).getTime() > dayAgo) st.today += 1;
+    if (st.recent.length < 4) {
+      st.recent.push(String(b.user));
+      wanted.add(String(b.user));
+    }
+    stats.set(key, st);
+  }
+  const users = wanted.size ? await User.find({ _id: { $in: [...wanted] } }).select('name avatarUrl').lean() : [];
+  const byId = new Map(users.map((u) => [String(u._id), u]));
+
+  const items = sessions.map((s) => {
+    const st = stats.get(String(s._id)) || { count: 0, earned: 0, today: 0, recent: [] };
+    return {
+      ...s,
+      bookedCount: st.count,
+      earned: st.earned,
+      bookedToday: st.today,
+      recentBookers: st.recent.map((id) => ({ name: byId.get(id)?.name || 'Fanitt user', avatarUrl: byId.get(id)?.avatarUrl || '' })),
+    };
+  });
+
+  return new ApiResponse(200, items, 'Upcoming sessions fetched').send(res);
+});
+
+// GET /api/sessions/:id/bookings — host only: everyone who booked, newest first.
+const sessionBookings = catchAsync(async (req, res) => {
+  const session = await Session.findById(req.params.id).populate('creator', 'user');
+  if (!session) throw ApiError.notFound('Session not found');
+  if (String(session.creator?.user) !== String(req.user._id)) throw ApiError.forbidden('Only the host can see who booked');
+
+  const bookings = await Booking.find({ session: session._id, status: { $in: BOOKED } })
+    .populate('user', 'name avatarUrl')
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const people = bookings.map((b) => ({
+    bookingId: b._id,
+    userId: b.user?._id || null,
+    name: b.user?.name || 'Fanitt user',
+    avatarUrl: b.user?.avatarUrl || '',
+    bookedAt: b.createdAt,
+    paid: b.amountPaid || 0,
+    attended: Boolean(b.attended),
+  }));
+  const max = session.maxParticipants || 0;
+
+  return new ApiResponse(
+    200,
+    {
+      sessionId: session._id,
+      title: session.title,
+      scheduledAt: session.scheduledAt,
+      type: session.type,
+      price: session.price || 0,
+      isLive: Boolean(session.isLive),
+      maxParticipants: max,
+      booked: people.length,
+      seatsLeft: Math.max(0, max - people.length),
+      earned: people.reduce((sum, p) => sum + p.paid, 0),
+      bookedToday: people.filter((p) => new Date(p.bookedAt).getTime() > dayAgo).length,
+      people,
+    },
+    'Bookings fetched'
+  ).send(res);
+});
+
+module.exports = { listSessions, getSessionById, createSession, updateSession, cancelSession, getJoinToken, goLive, endLive, uploadBanner, mySessionHistory, myUpcomingSessions, sessionBookings };

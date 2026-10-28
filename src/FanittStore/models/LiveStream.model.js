@@ -1,3 +1,4 @@
+// File: src/FanittStore/models/LiveStream.model.js
 const mongoose = require('mongoose');
 const { LIVE_STATUS, LIVE_VISIBILITY, LIVE_PRIVATE_MODE } = require('../constants');
 
@@ -31,6 +32,10 @@ const liveStreamSchema = new mongoose.Schema(
     endedAt: { type: Date, default: null },
     cancelledReason: { type: String, default: '' },
     endedByAdmin: { type: Boolean, default: false },
+    // Scheduled but the host never started it → auto-cancelled + refunded.
+    missed: { type: Boolean, default: false },
+    // "Starts in 15 minutes" already sent to ticket holders.
+    reminderSentAt: { type: Date, default: null },
 
     roomName: { type: String, required: true, unique: true },
 
