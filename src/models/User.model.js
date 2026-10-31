@@ -77,6 +77,11 @@ const userSchema = new mongoose.Schema(
 
     passwordResetToken: { type: String, select: false },
     passwordResetExpires: { type: Date, select: false },
+    // Forgot password by email code (hash only — never the code itself).
+    passwordResetOtp: { type: String, select: false, default: null },
+    passwordResetOtpExpires: { type: Date, select: false, default: null },
+    passwordResetOtpAttempts: { type: Number, select: false, default: 0 },
+    passwordResetOtpSentAt: { type: Date, select: false, default: null },
 
     referredByAgency: { type: mongoose.Schema.Types.ObjectId, ref: 'AgencyProfile', default: null },
 

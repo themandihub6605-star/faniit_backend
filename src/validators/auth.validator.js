@@ -32,7 +32,12 @@ const loginSchema = z.object({
 });
 
 const forgotPasswordSchema = z.object({
-  email: z.string().email('Invalid email address'),
+  email: z.string().trim().toLowerCase().email('Invalid email address'),
+});
+
+const verifyResetOtpSchema = z.object({
+  email: z.string().trim().toLowerCase().email('Invalid email address'),
+  otp: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code'),
 });
 
 const resetPasswordSchema = z.object({
@@ -40,4 +45,4 @@ const resetPasswordSchema = z.object({
   newPassword: z.string().min(8, 'Password must be at least 8 characters'),
 });
 
-module.exports = { registerSchema, sendSignupOtpSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema };
+module.exports = { registerSchema, sendSignupOtpSchema, loginSchema, forgotPasswordSchema, verifyResetOtpSchema, resetPasswordSchema };

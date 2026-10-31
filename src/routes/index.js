@@ -46,6 +46,8 @@ router.use('/blocks', require('./block.routes'));
 router.use('/terms', require('./terms.routes'));
 router.use('/stories', require('./story.routes'));
 router.use('/wallet', require('./wallet.routes'));
+// Fees, GST, invoices and agreements (+ Admin → Billing & GST).
+router.use('/billing', require('./billing.routes'));
 // Before '/admin' so admin.routes doesn't catch them first.
 router.use('/admin/monitor', monitor.routes);
 router.use('/admin/account-deletions', require('./accountDeletion.routes'));

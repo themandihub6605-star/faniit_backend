@@ -1,3 +1,4 @@
+// File: src/routes/home.routes.js
 const express = require('express');
 const { getPublicLayout } = require('../controllers/homeLayout.controller');
 const banners = require('../controllers/homeBanner.controller');
@@ -22,6 +23,8 @@ router.get('/admin/banners', ...admin, banners.adminList);
 router.post('/admin/banners', ...admin, image, banners.adminCreate);
 router.put('/admin/banners/order', ...admin, banners.adminReorder);
 router.patch('/admin/banners/:id', ...admin, image, banners.adminUpdate);
+router.post('/admin/banners/:id/image', ...admin, banners.adminUseOldImage);
+router.post('/admin/banners/:id/restore', ...admin, banners.adminRestore);
 router.delete('/admin/banners/:id', ...admin, banners.adminDelete);
 
 module.exports = router;

@@ -53,6 +53,26 @@ const NOTIFY_TEXT = {
   },
 };
 
+/** Sends a "FanBox received" data message into the live's LiveKit room.
+ * Comes from the server (after payment), so it can't be faked by a viewer. */
+async function announceLiveFanBox(order, fromName) {
+  try {
+    const { LiveStream } = require('../models');
+    const livekit = require('./livekit.service');
+    const live = await LiveStream.findById(order.liveId).select('roomName status');
+    if (!live || live.status !== 'live' || !live.roomName) return;
+    await livekit.sendData(live.roomName, {
+      t: 'fanbox',
+      id: String(order._id),
+      n: fromName,
+      a: order.amount,
+      m: order.message || '',
+    });
+  } catch (err) {
+    log.warn('fanbox.live_alert_failed', { orderId: String(order._id), message: err?.message });
+  }
+}
+
 /** What happens once an order is paid, per item type. */
 async function afterPaid(order) {
   if (order.itemType === ORDER_ITEM.CALL) {
@@ -66,23 +86,39 @@ async function afterPaid(order) {
   const settings = await settingsService.getSettings();
 
   if (order.itemType === ORDER_ITEM.FANBOX) {
-    const credited = await earningsService.creditSale(order._id, { feePercent: settings.fanboxFeePercent });
+    // Credit can fail on a broken profile — the live alert and the
+    // notification still go out, and the failure is logged for a manual fix.
+    let credited = null;
+    try {
+      credited = await earningsService.creditSale(order._id, { feePercent: settings.fanboxFeePercent });
+    } catch (err) {
+      log.error('fanbox.credit_failed', err, { orderId: String(order._id) });
+    }
     // Keep the existing Gift record so the old FanBox screens still list it.
     if (credited?.transaction) {
-      await Gift.create({
-        fromUser: order.buyer,
-        toCreator: order.itemId,
-        amount: order.amount,
-        message: order.message || '',
-        transaction: credited.transaction,
-      });
+      try {
+        await Gift.create({
+          fromUser: order.buyer,
+          toCreator: order.itemId,
+          amount: order.amount,
+          message: order.message || '',
+          transaction: credited.transaction,
+        });
+      } catch (err) {
+        log.warn('fanbox.gift_record_failed', { orderId: String(order._id), message: err?.message });
+      }
     }
+    const buyer = await User.findById(order.buyer).select('name');
+    const fromName = buyer?.name || 'A fan';
+    const amountText = formatRupees(credited?.creatorEarning ?? order.amount);
+    // Real-time alert in the live it was sent from (host + viewers see it).
+    if (order.liveId) await announceLiveFanBox(order, fromName);
     await safeNotify({
       userId: order.seller,
       fromUser: order.buyer,
       type: 'gift_received',
-      title: 'You received a FanBox! 🎁',
-      message: `${formatRupees(credited?.creatorEarning ?? order.amount)} from a fan${order.message ? `: "${order.message}"` : '.'}`,
+      title: order.liveId ? `${amountText} FanBox in your live! 🎁` : 'You received a FanBox! 🎁',
+      message: `${amountText} from ${fromName}${order.message ? `: "${order.message}"` : '.'}`,
       relatedModel: 'StoreOrder',
       relatedId: order._id,
     });
@@ -156,6 +192,7 @@ async function startCheckout(buyer, spec, { payWith = PAY_WITH.RAZORPAY } = {}) 
     seller: spec.seller || spec.store.user,
     message: spec.message || '',
     context: spec.context || '',
+    liveId: spec.liveId || null,
     itemType: spec.itemType,
     itemId: spec.itemId,
     itemTitle: spec.itemTitle,

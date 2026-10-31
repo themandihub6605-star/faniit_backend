@@ -108,6 +108,19 @@ const campaignSchema = new mongoose.Schema(
     approvedAt: { type: Date, default: null },
 
     applicantCount: { type: Number, default: 0 },
+
+    // The brand's agreement, ticked when publishing — shown to creators.
+    brandAgreement: {
+      type: new mongoose.Schema(
+        {
+          acceptedAt: { type: Date, default: null },
+          version: { type: Number, default: 0 },
+          text: { type: String, default: '' },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
   },
   { timestamps: true }
 );

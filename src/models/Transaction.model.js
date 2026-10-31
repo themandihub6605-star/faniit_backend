@@ -15,6 +15,9 @@ const transactionSchema = new mongoose.Schema(
     agencyCommission: { type: Number, default: 0 },
     referralCommission: { type: Number, default: 0 },
     netAmount: { type: Number, default: 0 }, // amount actually credited to `to`
+    // GST the payer paid on top of `amount` (brand campaign / milestone payments).
+    gstAmount: { type: Number, default: 0 },
+    invoice: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
 
     // polymorphic reference to whatever this transaction is for
     // 'Milestone' — Point 12 milestone-level escrow deposits/payouts.

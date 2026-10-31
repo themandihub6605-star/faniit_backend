@@ -17,6 +17,19 @@ function parseRoles(value) {
   return [...new Set(list.map((r) => String(r).trim()).filter((r) => Broadcast.AUDIENCE_ROLES.includes(r)))];
 }
 
+/** filters arrive as a JSON string (multipart / query) or an object (JSON body). */
+function parseFilters(value) {
+  let raw = value;
+  if (typeof value === 'string') {
+    try {
+      raw = JSON.parse(value);
+    } catch {
+      throw ApiError.badRequest('Audience filters are invalid');
+    }
+  }
+  return broadcastService.normalizeFilters(raw);
+}
+
 function cleanLink(value) {
   const link = String(value || '').trim();
   if (!link) return '';
@@ -32,7 +45,8 @@ function cleanLink(value) {
 
 /**
  * POST /api/admin/notifications/broadcast  (multipart or JSON)
- * title, message, roles[] (empty = everyone), testEmail?, link?, imageUrl? or image file,
+ * title, message, roles[] (empty = everyone), filters? (JSON — plan, verification, activity…),
+ * testEmail?, link?, imageUrl? or image file,
  * scheduledAt? (ISO — in the future = scheduled, otherwise sent right away)
  */
 const createBroadcast = catchAsync(async (req, res) => {
@@ -45,6 +59,7 @@ const createBroadcast = catchAsync(async (req, res) => {
   // Old admin panel sent a single `role`.
   const roles = parseRoles(req.body.roles ?? (req.body.role ? [req.body.role] : []));
   const testEmail = String(req.body.testEmail || '').trim().toLowerCase();
+  const filters = testEmail ? broadcastService.normalizeFilters({}) : parseFilters(req.body.filters);
   const link = cleanLink(req.body.link);
   const imageUrl = req.file?.path || String(req.body.imageUrl || '').trim();
 
@@ -56,7 +71,7 @@ const createBroadcast = catchAsync(async (req, res) => {
   }
   const isScheduled = scheduledAt.getTime() > Date.now() + 30 * 1000;
 
-  const audience = await broadcastService.countAudience({ roles, testEmail });
+  const { count: audience } = await broadcastService.countAudience({ roles, testEmail, filters });
   if (audience === 0) {
     throw ApiError.badRequest(testEmail ? 'No account found with that email' : 'No users match this audience');
   }
@@ -68,6 +83,7 @@ const createBroadcast = catchAsync(async (req, res) => {
     link,
     roles: testEmail ? [] : roles,
     testEmail,
+    filters,
     status: isScheduled ? 'scheduled' : 'sending',
     scheduledAt: isScheduled ? scheduledAt : new Date(),
     stats: { targeted: audience },
@@ -86,12 +102,13 @@ const createBroadcast = catchAsync(async (req, res) => {
   ).send(res);
 });
 
-/** GET /api/admin/notifications/audience?roles=creator,brand&testEmail= */
+/** GET /api/admin/notifications/audience?roles=creator,brand&filters={json}&testEmail= */
 const audienceCount = catchAsync(async (req, res) => {
   const roles = parseRoles(req.query.roles || []);
   const testEmail = String(req.query.testEmail || '').trim().toLowerCase();
-  const count = await broadcastService.countAudience({ roles, testEmail });
-  return new ApiResponse(200, { count }, 'Audience counted').send(res);
+  const filters = testEmail ? {} : parseFilters(req.query.filters || '{}');
+  const { count, byRole } = await broadcastService.countAudience({ roles, testEmail, filters });
+  return new ApiResponse(200, { count, byRole }, 'Audience counted').send(res);
 });
 
 /** GET /api/admin/notifications/broadcasts?status=&page= */

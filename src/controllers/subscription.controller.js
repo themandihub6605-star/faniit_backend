@@ -138,16 +138,65 @@ const verifyCheckout = catchAsync(async (req, res) => {
   return new ApiResponse(200, sub, 'Subscription activated').send(res);
 });
 
-// POST /api/subscriptions/cancel — cancels at the end of the current paid period
+/** Razorpay SDK errors look like { statusCode, error: { code, description } } — no `message`. */
+function rzpMessage(err) {
+  return err?.error?.description || err?.message || (typeof err === 'string' ? err : 'Razorpay request failed');
+}
+
+// Razorpay subscription states where nothing is left to cancel (autopay already off).
+const RZP_DONE = ['cancelled', 'completed', 'expired'];
+// States where no payment has been taken yet — safe to cancel straight away.
+const RZP_NOT_STARTED = ['created', 'authenticated'];
+
+// POST /api/subscriptions/cancel — stops autopay; benefits stay until the end of the paid period
 const cancelSubscription = catchAsync(async (req, res) => {
   const sub = await UserSubscription.findOne({ user: req.user._id });
   if (!sub || !sub.razorpaySubscriptionId) throw ApiError.badRequest('No active paid subscription to cancel');
+  if (sub.cancelAtPeriodEnd) {
+    await sub.populate('plan');
+    return new ApiResponse(200, sub, 'Your plan is already cancelled — it ends at the end of this period').send(res);
+  }
 
-  await razorpay.subscriptions.cancel(sub.razorpaySubscriptionId, { cancel_at_cycle_end: 1 });
+  const rzpId = sub.razorpaySubscriptionId;
+
+  // 1) Where is this subscription on Razorpay right now?
+  let rzpStatus = null;
+  try {
+    const rzpSub = await razorpay.subscriptions.fetch(rzpId);
+    rzpStatus = rzpSub.status;
+  } catch (err) {
+    console.error(`[subscription] cancel: fetch ${rzpId} failed (${err?.statusCode}):`, rzpMessage(err));
+    // 400 here = this id doesn't exist for the current Razorpay keys (e.g. made with test keys) —
+    // there is no autopay on this account to stop, so just end it on our side.
+    if (err?.statusCode !== 400) throw ApiError.badRequest(`Couldn't reach Razorpay: ${rzpMessage(err)}. Please try again.`);
+  }
+
+  // 2) Stop autopay on Razorpay.
+  if (rzpStatus && !RZP_DONE.includes(rzpStatus)) {
+    const atCycleEnd = !RZP_NOT_STARTED.includes(rzpStatus);
+    try {
+      await razorpay.subscriptions.cancel(rzpId, atCycleEnd);
+    } catch (err) {
+      console.error(`[subscription] cancel ${rzpId} (status ${rzpStatus}, atCycleEnd ${atCycleEnd}) failed:`, rzpMessage(err));
+      if (!atCycleEnd) throw ApiError.badRequest(rzpMessage(err));
+      // Cycle-end cancel refused (some payment methods/states don't allow it) — cancel now instead.
+      // The user still keeps paid benefits until currentPeriodEnd: our side only downgrades
+      // when that date passes (see subscription.service.js).
+      try {
+        await razorpay.subscriptions.cancel(rzpId, false);
+      } catch (err2) {
+        console.error(`[subscription] immediate cancel ${rzpId} failed:`, rzpMessage(err2));
+        throw ApiError.badRequest(rzpMessage(err2));
+      }
+    }
+  }
+
+  // 3) Our side: no renewal; drops to the free plan when the paid period ends.
   sub.cancelAtPeriodEnd = true;
   await sub.save();
+  await sub.populate('plan');
 
-  return new ApiResponse(200, sub, 'Subscription will end at the current period').send(res);
+  return new ApiResponse(200, sub, 'Autopay stopped — your plan stays active until the end of this period').send(res);
 });
 
 module.exports = { listPlans, getMySubscription, createCheckout, verifyCheckout, cancelSubscription };

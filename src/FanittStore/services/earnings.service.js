@@ -3,18 +3,17 @@ const walletService = require('../../services/wallet.service');
 const { TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../../constants/enums');
 const { Store, StoreOrder, DigitalProduct, LiveStream } = require('../models');
 const { ORDER_ITEM } = require('../constants');
-const { percentOf } = require('../utils/money');
 const log = require('../utils/logger');
 
 // Moves money for store sales in and out of the ONE existing Fanitt wallet.
 //
 // Split of a charged amount:
-//   store fee (settings.storeFeePercent)  → Fanitt
 //   agency / referral commission          → existing wallet.service rules
 //   the rest                              → seller's walletBalance
 //
-// The fee is taken here, at sale time, so the credited amount is also added
-// to `walletFeeExempt` — withdrawals don't charge a second fee on it.
+// Fanitt's platform fee is NOT taken here any more — it's taken only when the
+// creator withdraws (their plan's fee + GST, see billing.service.js). The
+// `feePercent` callers pass is ignored and every sale records fee 0.
 
 async function bumpItemStats(order, sign, gross) {
   if (order.itemType === ORDER_ITEM.DIGITAL_PRODUCT) {
@@ -49,8 +48,10 @@ async function creditSale(orderId, { feePercent, grossAmount = null }) {
     const store = order.store ? await Store.findById(order.store).select('creator user') : null;
     const creatorProfileId = store ? store.creator : (await CreatorProfile.findOne({ user: order.seller }).select('_id'))?._id;
     if (!creatorProfileId) throw new Error('Creator profile not found for this seller');
-    const feeAmount = percentOf(gross, feePercent);
-    const afterFee = gross - feeAmount;
+    // No fee at sale time — it's taken on withdrawal.
+    void feePercent;
+    const feeAmount = 0;
+    const afterFee = gross;
 
     let agencyCommission = 0;
     let referralCommission = 0;
@@ -61,7 +62,6 @@ async function creditSale(orderId, { feePercent, grossAmount = null }) {
       referralCommission = split.referralCommission;
       creatorEarning = split.netAmount;
       await walletService.creditCreator(creatorProfileId, creatorEarning);
-      await User.updateOne({ _id: order.seller }, { $inc: { walletFeeExempt: creatorEarning } });
     }
 
     let transaction = null;
@@ -84,7 +84,7 @@ async function creditSale(orderId, { feePercent, grossAmount = null }) {
       });
     }
 
-    order.feePercent = feePercent;
+    order.feePercent = 0;
     order.feeAmount = feeAmount;
     order.agencyCommission = agencyCommission;
     order.referralCommission = referralCommission;
@@ -138,7 +138,10 @@ async function reverseSale(order, { byUserId, reason }) {
   const amount = order.creatorEarning || 0;
   if (amount > 0) {
     await User.updateOne({ _id: order.seller }, { $inc: { walletBalance: -amount } });
-    // Lower the fee-exempt part too, but never below zero.
+  }
+  // Only older sales (fee taken at sale time) were added to the fee-exempt
+  // part — take those back out, but never below zero.
+  if (amount > 0 && (order.feeAmount || 0) > 0) {
     const reduced = await User.updateOne({ _id: order.seller, walletFeeExempt: { $gte: amount } }, { $inc: { walletFeeExempt: -amount } });
     if (reduced.modifiedCount === 0) await User.updateOne({ _id: order.seller }, { $set: { walletFeeExempt: 0 } });
   }

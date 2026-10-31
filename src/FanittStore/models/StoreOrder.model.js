@@ -20,6 +20,8 @@ const storeOrderSchema = new mongoose.Schema(
     // FanBox: supporter's note and where it was sent from.
     message: { type: String, trim: true, maxlength: 200, default: '' },
     context: { type: String, default: '' },
+    // FanBox sent during a live — the live room gets a real-time alert.
+    liveId: { type: mongoose.Schema.Types.ObjectId, ref: 'LiveStream', default: null },
 
     amount: { type: Number, required: true, min: 0 }, // paise the buyer paid
     paidWith: { type: String, enum: ['razorpay', 'wallet', 'free'], default: 'razorpay' },

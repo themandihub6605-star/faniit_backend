@@ -263,48 +263,126 @@ const getMe = catchAsync(async (req, res) => {
   return new ApiResponse(200, { ...req.user.toSafeObject(), profileStatus }, 'Current user fetched').send(res);
 });
 
-// Point-Fix: this used to generate and save a reset token but NEVER
-// actually send it anywhere — the person requesting a reset had no way
-// to get the link at all. Now sends the RAW (unhashed) token in the
-// email link; only the SHA-256 hash of it is stored in the DB (standard
-// practice — if the DB ever leaked, the stored hash alone can't be used
-// to reset anyone's password).
+// --- Forgot password: email a 6-digit code → verify it → set a new password ---
+//
+// 1. POST /auth/forgot-password { email }        → emails a 6-digit code (10 min)
+// 2. POST /auth/forgot-password/verify { email, otp } → returns a one-time resetToken (15 min)
+// 3. POST /auth/reset-password { token, newPassword }  → sets the password
+//
+// The email also carries the old website link (same reset-password endpoint),
+// so the website keeps working. Only hashes of the code / token are stored.
+const RESET_OTP_MINUTES = 10;
+const RESET_TOKEN_MINUTES = 15;
+const RESET_RESEND_SECONDS = 60;
+const RESET_MAX_ATTEMPTS = 5;
+
+const sha256 = (value) => crypto.createHash('sha256').update(value).digest('hex');
+const otpHash = (email, otp) => sha256(`reset:${email}:${otp}`);
+
+function sameHash(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
 const forgotPassword = catchAsync(async (req, res) => {
-  const { email } = req.body;
-  const user = await User.findOne({ email });
+  const email = normalizeEmail(req.body.email);
+  const generic = 'If an account exists for this email, we’ve sent a 6-digit code to it.';
+  const user = await User.findOne({ email }).select('+passwordResetOtpSentAt');
 
   if (user) {
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    user.passwordResetToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-    user.passwordResetExpires = Date.now() + 15 * 60 * 1000;
+    // One email a minute, so the button can't be used to spam someone.
+    const sentAt = user.passwordResetOtpSentAt ? new Date(user.passwordResetOtpSentAt).getTime() : 0;
+    const waitSeconds = Math.ceil((sentAt + RESET_RESEND_SECONDS * 1000 - Date.now()) / 1000);
+    if (waitSeconds > 0) {
+      return new ApiResponse(200, { resendInSeconds: waitSeconds }, generic).send(res);
+    }
+
+    const otp = String(crypto.randomInt(100000, 1000000));
+    const linkToken = crypto.randomBytes(32).toString('hex');
+    user.passwordResetOtp = otpHash(email, otp);
+    user.passwordResetOtpExpires = new Date(Date.now() + RESET_OTP_MINUTES * 60 * 1000);
+    user.passwordResetOtpAttempts = 0;
+    user.passwordResetOtpSentAt = new Date();
+    // Website link (fanitt.com/reset-password) keeps working.
+    user.passwordResetToken = sha256(linkToken);
+    user.passwordResetExpires = new Date(Date.now() + RESET_TOKEN_MINUTES * 60 * 1000);
     await user.save({ validateBeforeSave: false });
 
-    sendPasswordResetEmail({
+    const sent = await sendPasswordResetEmail({
       to: user.email,
       name: user.name,
-      resetLink: `https://fanitt.com/reset-password?token=${resetToken}`,
+      otp,
+      resetLink: `https://fanitt.com/reset-password?token=${linkToken}`,
     });
+    if (sent === false) {
+      // Let them try again straight away.
+      await User.updateOne({ _id: user._id }, { $set: { passwordResetOtpSentAt: null } });
+      throw ApiError.badRequest('We couldn’t send the email right now. Please try again in a minute.', [], 'EMAIL_NOT_SENT');
+    }
   }
 
-  return new ApiResponse(200, null, 'If that email exists, a reset link has been sent').send(res);
+  return new ApiResponse(200, { resendInSeconds: RESET_RESEND_SECONDS }, generic).send(res);
+});
+
+/** Checks the 6-digit code and hands back a one-time token for /reset-password. */
+const verifyResetOtp = catchAsync(async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const otp = String(req.body.otp || '').trim();
+  const invalid = () => ApiError.badRequest('That code is wrong or has expired. Check the latest email or request a new code.', [], 'RESET_OTP_INVALID');
+
+  const user = await User.findOne({ email }).select('+passwordResetOtp +passwordResetOtpExpires +passwordResetOtpAttempts');
+  if (!user || !user.passwordResetOtp || !user.passwordResetOtpExpires || user.passwordResetOtpExpires.getTime() < Date.now()) {
+    throw invalid();
+  }
+  if ((user.passwordResetOtpAttempts || 0) >= RESET_MAX_ATTEMPTS) {
+    await User.updateOne({ _id: user._id }, { $set: { passwordResetOtp: null, passwordResetOtpExpires: null } });
+    throw ApiError.badRequest('Too many wrong codes. Please request a new code.', [], 'RESET_OTP_LOCKED');
+  }
+
+  if (!sameHash(otpHash(email, otp), user.passwordResetOtp)) {
+    await User.updateOne({ _id: user._id }, { $inc: { passwordResetOtpAttempts: 1 } });
+    const left = RESET_MAX_ATTEMPTS - (user.passwordResetOtpAttempts || 0) - 1;
+    throw ApiError.badRequest(
+      left > 0 ? `Wrong code. ${left} ${left === 1 ? 'try' : 'tries'} left.` : 'Too many wrong codes. Please request a new code.',
+      [],
+      left > 0 ? 'RESET_OTP_INVALID' : 'RESET_OTP_LOCKED'
+    );
+  }
+
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  await User.updateOne(
+    { _id: user._id },
+    {
+      $set: {
+        passwordResetToken: sha256(resetToken),
+        passwordResetExpires: new Date(Date.now() + RESET_TOKEN_MINUTES * 60 * 1000),
+        passwordResetOtp: null,
+        passwordResetOtpExpires: null,
+        passwordResetOtpAttempts: 0,
+      },
+    }
+  );
+
+  return new ApiResponse(200, { resetToken, expiresInMinutes: RESET_TOKEN_MINUTES }, 'Code verified — choose a new password').send(res);
 });
 
 const resetPassword = catchAsync(async (req, res) => {
   const { token, newPassword } = req.body;
-  const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
   const user = await User.findOne({
-    passwordResetToken: hashedToken,
-    passwordResetExpires: { $gt: Date.now() },
+    passwordResetToken: sha256(String(token)),
+    passwordResetExpires: { $gt: new Date() },
   });
-  if (!user) throw ApiError.badRequest('Reset token is invalid or has expired');
+  if (!user) throw ApiError.badRequest('This reset has expired. Please start again and request a new code.', [], 'RESET_TOKEN_INVALID');
 
   user.password = newPassword;
   user.passwordResetToken = undefined;
   user.passwordResetExpires = undefined;
+  user.passwordResetOtp = undefined;
+  user.passwordResetOtpExpires = undefined;
+  user.passwordResetOtpAttempts = 0;
   await user.save();
 
-  return new ApiResponse(200, null, 'Password reset successfully').send(res);
+  return new ApiResponse(200, null, 'Password updated. Log in with your new password.').send(res);
 });
 
 const upgradeRole = catchAsync(async (req, res) => {
@@ -407,4 +485,4 @@ const googleAuth = catchAsync(async (req, res) => {
   return new ApiResponse(200, { user: { ...user.toSafeObject(), profileStatus }, accessToken, refreshToken, isNewUser, profileStatus }, 'Signed in with Google').send(res);
 });
 
-module.exports = { register, sendSignupOtp, login, verifyAdminCode, refresh, logout, getMe, forgotPassword, resetPassword, googleAuth, upgradeRole, completeOnboarding };
+module.exports = { register, sendSignupOtp, login, verifyAdminCode, refresh, logout, getMe, forgotPassword, verifyResetOtp, resetPassword, googleAuth, upgradeRole, completeOnboarding };

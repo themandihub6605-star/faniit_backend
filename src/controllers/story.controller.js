@@ -1,6 +1,7 @@
 // File: src/controllers/story.controller.js
 const mongoose = require('mongoose');
 const { Story, User, CreatorProfile, BrandProfile } = require('../models');
+const notificationService = require('../services/notification.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -15,6 +16,7 @@ const blocks = require('../utils/blocks');
 //   GET    /stories/me         my active stories with view counts
 //   GET    /stories/user/:id   one author's active stories (profile ring)
 //   POST   /stories/:id/view   mark seen
+//   POST   /stories/:id/react  { emoji } — react; same emoji again removes it
 //   GET    /stories/:id/viewers  who saw my story
 //   DELETE /stories/:id
 
@@ -27,6 +29,8 @@ function active() {
 }
 
 function storyView(s, userId) {
+  const isOwner = Boolean(userId && String(s.author?._id || s.author) === String(userId));
+  const mine = userId ? (s.reactions || []).find((r) => String(r.user) === String(userId)) : null;
   return {
     _id: s._id,
     media: s.media,
@@ -35,6 +39,9 @@ function storyView(s, userId) {
     expiresAt: s.expiresAt,
     viewCount: s.viewCount || 0,
     seen: Boolean(userId && (s.viewers || []).some((v) => String(v) === String(userId))),
+    myReaction: mine ? mine.emoji : null,
+    // Only the author sees how many reactions came in (like Instagram).
+    reactionCount: isOwner ? s.reactionCount || (s.reactions || []).length : 0,
   };
 }
 
@@ -114,11 +121,62 @@ const markViewed = catchAsync(async (req, res) => {
   return new ApiResponse(200, { seen: true }, 'Seen').send(res);
 });
 
+/**
+ * React with one emoji. Sending the emoji you already gave removes it;
+ * a different one replaces it. The author gets one notification per person.
+ */
+const reactToStory = catchAsync(async (req, res) => {
+  if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.notFound('Story not found');
+  const emoji = String(req.body?.emoji || '').trim();
+  if (!Story.REACTIONS.includes(emoji)) throw ApiError.badRequest('Pick one of the reactions');
+
+  const story = await Story.findOne({ _id: req.params.id, ...active() }).select('author reactions');
+  if (!story) throw ApiError.notFound('This story has expired');
+  const me = req.user._id;
+  if (String(story.author) === String(me)) throw ApiError.badRequest('You can’t react to your own story');
+  if (await blocks.isBlockedBetween(me, story.author)) throw ApiError.notFound('Story not found');
+
+  const existing = (story.reactions || []).find((r) => String(r.user) === String(me));
+
+  // Remove my old reaction first (plain $pull — works on FerretDB too).
+  if (existing) await Story.updateOne({ _id: story._id }, { $pull: { reactions: { user: me } } });
+
+  if (existing && existing.emoji === emoji) {
+    await Story.updateOne({ _id: story._id }, { $inc: { reactionCount: -1 } });
+    return new ApiResponse(200, { reaction: null }, 'Reaction removed').send(res);
+  }
+
+  await Story.updateOne(
+    { _id: story._id },
+    {
+      $push: { reactions: { user: me, emoji, at: new Date() } },
+      $addToSet: { viewers: me },
+      ...(existing ? {} : { $inc: { reactionCount: 1 } }),
+    }
+  );
+
+  if (!existing) {
+    notificationService
+      .notify({
+        userId: story.author,
+        fromUser: me,
+        type: 'like',
+        title: 'New story reaction',
+        message: `${req.user.name || 'Someone'} reacted ${emoji} to your story`,
+      })
+      .catch(() => {});
+  }
+  return new ApiResponse(200, { reaction: emoji }, 'Reacted').send(res);
+});
+
 const getViewers = catchAsync(async (req, res) => {
   if (!mongoose.isValidObjectId(req.params.id)) throw ApiError.notFound('Story not found');
-  const story = await Story.findOne({ _id: req.params.id, author: req.user._id }).select('viewers');
+  const story = await Story.findOne({ _id: req.params.id, author: req.user._id }).select('viewers reactions');
   if (!story) throw ApiError.notFound('Story not found');
-  const ids = story.viewers.slice(-200).reverse(); // latest first
+  const reactionOf = new Map((story.reactions || []).map((r) => [String(r.user), r.emoji]));
+  // People who reacted come first, then everyone else — latest first.
+  const latest = story.viewers.slice(-200).reverse();
+  const ids = [...latest.filter((id) => reactionOf.has(String(id))), ...latest.filter((id) => !reactionOf.has(String(id)))];
   const [users, creators, brands] = await Promise.all([
     User.find({ _id: { $in: ids } }).select('name avatarUrl role').lean(),
     CreatorProfile.find({ user: { $in: ids } }).select('user slug followers').lean(),
@@ -135,7 +193,7 @@ const getViewers = catchAsync(async (req, res) => {
   const list = ids
     .map((id) => byId.get(String(id)))
     .filter(Boolean)
-    .map((u) => ({ ...u, profile: profiles.get(String(u._id)) || null }));
+    .map((u) => ({ ...u, profile: profiles.get(String(u._id)) || null, reaction: reactionOf.get(String(u._id)) || null }));
   return new ApiResponse(200, list, 'Viewers fetched').send(res);
 });
 
@@ -147,4 +205,4 @@ const deleteStory = catchAsync(async (req, res) => {
 });
 
 
-module.exports = { createStory, getStoryFeed, getMyStories, getUserStories, markViewed, getViewers, deleteStory };
+module.exports = { createStory, getStoryFeed, getMyStories, getUserStories, markViewed, reactToStory, getViewers, deleteStory };

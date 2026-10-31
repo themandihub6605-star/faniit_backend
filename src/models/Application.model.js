@@ -1,6 +1,17 @@
 const mongoose = require('mongoose');
 const { APPLICATION_STATUS } = require('../constants/enums');
 
+// What each side agreed to — the exact text and version, frozen at the moment
+// they ticked the box (so later edits by the admin don't change it).
+const agreementSchema = new mongoose.Schema(
+  {
+    acceptedAt: { type: Date, default: null },
+    version: { type: Number, default: 0 },
+    text: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const applicationSchema = new mongoose.Schema(
   {
     campaign: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', required: true, index: true },
@@ -18,6 +29,11 @@ const applicationSchema = new mongoose.Schema(
     feedback: { type: String, default: '' },
     rejectionReason: { type: String, default: '' },
     respondedAt: { type: Date, default: null },
+
+    // Creator ticks this when sending the proposal; brand when accepting it.
+    // Each side can see the other's.
+    creatorAgreement: { type: agreementSchema, default: null },
+    brandAgreement: { type: agreementSchema, default: null },
   },
   { timestamps: true }
 );

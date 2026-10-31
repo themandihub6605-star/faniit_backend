@@ -11,6 +11,7 @@ const {
   logout,
   getMe,
   forgotPassword,
+  verifyResetOtp,
   resetPassword,
   googleAuth,
   upgradeRole,
@@ -19,7 +20,7 @@ const {
 const { protect } = require('../middlewares/auth.middleware');
 const validate = require('../middlewares/validate.middleware');
 const { authLimiter, loginPerEmailLimiter, passwordResetLimiter, otpLimiter, refreshLimiter } = require('../middlewares/rateLimiter.middleware');
-const { registerSchema, sendSignupOtpSchema, loginSchema, forgotPasswordSchema, resetPasswordSchema } = require('../validators/auth.validator');
+const { registerSchema, sendSignupOtpSchema, loginSchema, forgotPasswordSchema, verifyResetOtpSchema, resetPasswordSchema } = require('../validators/auth.validator');
 
 // Sign-up step 1: email a 6-digit code. Step 2 (/register) needs that code.
 router.post('/register/send-otp', otpLimiter, validate(sendSignupOtpSchema), sendSignupOtp);
@@ -30,7 +31,9 @@ router.post('/google', authLimiter, googleAuth);
 router.post('/refresh', refreshLimiter, refresh);
 router.post('/logout', logout);
 router.get('/me', protect, getMe);
+// Forgot password: email a 6-digit code → verify it → set a new password.
 router.post('/forgot-password', passwordResetLimiter, validate(forgotPasswordSchema), forgotPassword);
+router.post('/forgot-password/verify', otpLimiter, validate(verifyResetOtpSchema), verifyResetOtp);
 router.post('/reset-password', authLimiter, validate(resetPasswordSchema), resetPassword);
 router.post('/upgrade-role', protect, upgradeRole);
 router.post('/complete-onboarding', protect, completeOnboarding);

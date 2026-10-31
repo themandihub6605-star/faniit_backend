@@ -1,5 +1,5 @@
 // File: src/FanittStore/services/livekit.service.js
-const { AccessToken, RoomServiceClient, WebhookReceiver } = require('livekit-server-sdk');
+const { AccessToken, RoomServiceClient, WebhookReceiver, DataPacket_Kind } = require('livekit-server-sdk');
 const env = require('../../config/env');
 const ApiError = require('../../utils/apiError');
 const log = require('../utils/logger');
@@ -145,4 +145,18 @@ async function parseWebhook(rawBody, authHeader) {
   return receiver.receive(rawBody, authHeader);
 }
 
-module.exports = { createToken, ensureRoom, closeRoom, listParticipants, removeParticipant, muteTracks, parseWebhook, isConfigured };
+/** Sends a JSON data message to everyone in a room (same format the app's
+ * chat / hearts use). Never throws. */
+async function sendData(roomName, payload) {
+  if (!isConfigured()) return false;
+  try {
+    const data = new TextEncoder().encode(JSON.stringify(payload));
+    await rooms().sendData(roomName, data, DataPacket_Kind.RELIABLE, {});
+    return true;
+  } catch (err) {
+    log.warn('livekit.send_data_failed', { roomName, message: err?.message });
+    return false;
+  }
+}
+
+module.exports = { createToken, ensureRoom, closeRoom, listParticipants, removeParticipant, muteTracks, parseWebhook, isConfigured, sendData };

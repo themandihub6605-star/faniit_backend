@@ -2,6 +2,7 @@
 const { Campaign, Milestone, CreatorProfile, SiteSettings } = require('../models');
 const paymentService = require('../services/payment.service');
 const milestoneService = require('../services/milestone.service');
+const billing = require('../services/billing.service');
 const {
   sendMilestoneFundedEmail,
   sendMilestoneSubmittedEmail,
@@ -38,12 +39,17 @@ const initiateMilestoneFunding = catchAsync(async (req, res) => {
   if (!campaign.brand.user.equals(req.user._id)) throw ApiError.forbidden('You do not own this campaign');
   if (milestone.status !== 'pending') throw ApiError.conflict('This milestone has already been funded');
 
-  const order = await paymentService.createOrder(milestone.amount, `milestone_${milestone._id}`, {
+  // GST (if on) is added on top — the creator still gets the full milestone amount.
+  const breakdown = await billing.brandPaymentBreakdown(milestone.amount);
+  const order = await paymentService.createOrder(breakdown.total, `milestone_${milestone._id}`, {
     milestoneId: String(milestone._id),
     campaignId: String(campaign._id),
+    base: String(breakdown.base),
+    gstAmount: String(breakdown.gstAmount),
+    gstPercent: String(breakdown.gstPercent),
   });
 
-  return new ApiResponse(200, { order }, 'Complete payment to fund this milestone').send(res);
+  return new ApiResponse(200, { order, breakdown }, 'Complete payment to fund this milestone').send(res);
 });
 
 // POST /milestones/:id/verify-payment — brand's Razorpay payment confirmed client-side.
@@ -57,8 +63,15 @@ const verifyMilestonePayment = catchAsync(async (req, res) => {
 
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
-  // The payment must be real, unused and for exactly this milestone's amount.
-  await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId, expectedAmount: milestone.amount });
+  // The payment must be real, unused, for this milestone, and for its amount
+  // plus the GST we quoted on it.
+  const order = await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
+  const notes = order.notes || {};
+  const gstAmount = Number(notes.gstAmount || 0);
+  const gstPercent = Number(notes.gstPercent || 0);
+  if (String(notes.milestoneId) !== String(milestone._id) || Number(order.amount) !== milestone.amount + gstAmount) {
+    throw ApiError.badRequest('Payment amount does not match');
+  }
 
   const { milestone: fundedMilestone } = await milestoneService.fundMilestone({
     milestoneId: milestone._id,
@@ -66,6 +79,23 @@ const verifyMilestonePayment = catchAsync(async (req, res) => {
     razorpayOrderId,
     razorpayPaymentId,
   });
+
+  // Tax invoice for the brand (app + email). Never blocks the payment.
+  const invoice = await billing.issueBrandPaymentInvoice({
+    brandUserId: req.user._id,
+    relatedModel: 'Milestone',
+    relatedId: fundedMilestone._id,
+    title: `Milestone payment — ${campaign.title}`,
+    lineLabel: `${fundedMilestone.title} · "${campaign.title}"`,
+    base: fundedMilestone.amount,
+    gstPercent,
+    gstAmount,
+    razorpayPaymentId,
+  });
+  if (fundedMilestone.escrowTransaction) {
+    const { Transaction } = require('../models');
+    await Transaction.updateOne({ _id: fundedMilestone.escrowTransaction }, { $set: { gstAmount, invoice: invoice?._id || null } });
+  }
 
   // Point-Fix: email the creator that this milestone is funded and they
   // can begin work. Population is separate from the funding logic above

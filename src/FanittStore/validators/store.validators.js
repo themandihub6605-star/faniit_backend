@@ -217,6 +217,8 @@ const fanboxSchema = z
       .max(FANBOX.MAX_AMOUNT, `Maximum ₹${FANBOX.MAX_AMOUNT / 100}`),
     message: trimmed(200).optional(),
     context: z.enum(FANBOX.CONTEXTS).optional(),
+    // The live it was sent from (shows an alert in that live).
+    liveId: objectId.optional(),
     payWith,
   })
   .refine((v) => v.creatorId || v.storeId, { message: 'creatorId or storeId is required', path: ['creatorId'] });

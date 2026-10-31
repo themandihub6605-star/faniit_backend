@@ -743,6 +743,9 @@ const markWithdrawalPaid = catchAsync(async (req, res) => {
   withdrawal.processedAt = new Date();
   await withdrawal.save();
 
+  // Tax invoice for Fanitt's platform fee (+ GST) — app + email. Never blocks.
+  require('../services/billing.service').issueWithdrawalInvoice(withdrawal).catch(() => {});
+
   if (withdrawal.user?.email) {
     sendWithdrawalCompletedEmail({
       to: withdrawal.user.email,

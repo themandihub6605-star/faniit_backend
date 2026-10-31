@@ -1,13 +1,14 @@
 const mongoose = require('mongoose');
 const { CreatorProfile, User } = require('../../models');
 const ApiError = require('../../utils/apiError');
-const { Store } = require('../models');
-const { ORDER_ITEM, FANBOX, STORE_STATUS } = require('../constants');
+const { Store, LiveStream } = require('../models');
+const { ORDER_ITEM, FANBOX, STORE_STATUS, LIVE_STATUS } = require('../constants');
 const orderService = require('./order.service');
 
 // FanBox = a tip to a creator, from anywhere (profile, store, live…).
-// Paid like any store item (Razorpay or wallet). The FanBox fee
-// (settings.fanboxFeePercent, default 3%) is taken when it's credited.
+// Paid like any store item (Razorpay or wallet). No fee is taken here —
+// Fanitt's fee is taken when the creator withdraws (billing.service.js).
+// Sent from a live (liveId) → the live room shows an alert once it's paid.
 
 async function resolveCreator({ creatorId, storeId }) {
   if (storeId) {
@@ -25,7 +26,7 @@ async function resolveCreator({ creatorId, storeId }) {
 }
 
 /** Starts a FanBox payment. Returns what orderService.startCheckout returns. */
-async function startFanBox(sender, { creatorId, storeId, amount, message = '', context = 'profile', payWith }) {
+async function startFanBox(sender, { creatorId, storeId, amount, message = '', context = 'profile', liveId, payWith }) {
   const { creator, store } = await resolveCreator({ creatorId, storeId });
   if (!creator) throw ApiError.notFound('Creator not found');
   if (String(creator.user) === String(sender._id)) throw ApiError.badRequest("You can't send a FanBox to yourself");
@@ -36,6 +37,12 @@ async function startFanBox(sender, { creatorId, storeId, amount, message = '', c
 
   const receiver = await User.findById(creator.user).select('name isActive isSuspended');
   if (!receiver || receiver.isActive === false || receiver.isSuspended) throw ApiError.badRequest('This creator cannot receive FanBox right now');
+
+  // Only keep the live when it's this creator's and it's on air right now.
+  let live = null;
+  if (liveId && mongoose.isValidObjectId(liveId) && store) {
+    live = await LiveStream.findOne({ _id: liveId, store: store._id, status: LIVE_STATUS.LIVE }).select('_id');
+  }
 
   return orderService.startCheckout(
     sender,
@@ -51,6 +58,7 @@ async function startFanBox(sender, { creatorId, storeId, amount, message = '', c
       amount,
       message: String(message || '').slice(0, 200),
       context: FANBOX.CONTEXTS.includes(context) ? context : 'other',
+      liveId: live?._id || null,
       description: `FanBox for ${receiver.name}`,
       reusePending: false,
     },

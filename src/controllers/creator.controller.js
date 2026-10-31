@@ -80,7 +80,8 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
     .populate('user', 'name avatarUrl')
     .populate('category', 'label icon');
 
-  if (!creator) throw ApiError.notFound('Creator not found');
+  // Account deleted / removed → the profile is gone too (was a 500 crash).
+  if (!creator || !creator.user) throw ApiError.notFound('Creator not found');
 
   const sessions = await Session.find({ creator: creator._id, isCancelled: false, isCompleted: false }).sort({ scheduledAt: 1 });
   const reviews = await Review.find({ toUser: creator.user._id, isHidden: false }).sort({ createdAt: -1 }).limit(10);
@@ -90,8 +91,8 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
   const sub = await UserSubscription.findOne({ user: creator.user._id }).populate('plan', 'name price');
   const creatorWithPlan = {
     ...creator.toObject(),
-    planName: sub ? sub.plan.name : 'Lite',
-    isProPlan: sub ? sub.plan.price > 0 : false,
+    planName: sub?.plan ? sub.plan.name : 'Lite',
+    isProPlan: sub?.plan ? sub.plan.price > 0 : false,
   };
 
   const isFollowing = !!(req.user && creator.followers.some((f) => f.equals(req.user._id)));

@@ -890,7 +890,9 @@ async function buyerReceived(buyerId, orderId) {
 
 /**
  * Pays the seller for a delivered order, exactly once.
- * Fee = shop fee % of the items total (delivery charge is not charged).
+ * Online orders: no fee here — Fanitt's fee is taken when the creator
+ * withdraws (billing.service.js). COD orders never reach the wallet, so the
+ * shop fee % of the items total is still charged from the wallet for those.
  */
 async function settleOrder(orderId) {
   const order = await ShopOrder.findOneAndUpdate(
@@ -899,8 +901,10 @@ async function settleOrder(orderId) {
     { new: true }
   );
   if (!order) return null;
-  const { feePercent } = await shopSettings();
-  const feeAmount = percentOf(order.itemsTotal, feePercent);
+  const shopFee = (await shopSettings()).feePercent;
+  const isCod = order.paymentMethod !== PAYMENT_METHOD.ONLINE;
+  const feePercent = isCod ? shopFee : 0;
+  const feeAmount = isCod ? percentOf(order.itemsTotal, feePercent) : 0;
 
   try {
     const store = await Store.findById(order.store).select('creator');
@@ -915,7 +919,6 @@ async function settleOrder(orderId) {
         referralCommission = split.referralCommission;
         creatorEarning = split.netAmount;
         await walletService.creditCreator(store.creator, creatorEarning);
-        await User.updateOne({ _id: order.seller }, { $inc: { walletFeeExempt: creatorEarning } });
       }
       await Transaction.create({
         type: TRANSACTION_TYPE.STORE_SALE,

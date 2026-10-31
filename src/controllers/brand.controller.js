@@ -88,7 +88,8 @@ const getBrandBySlug = catchAsync(async (req, res) => {
     { new: true }
   ).populate('user', 'name avatarUrl email');
 
-  if (!brand) throw ApiError.notFound('Brand not found');
+  // Account deleted / removed → the profile is gone too (was a 500 crash).
+  if (!brand || !brand.user) throw ApiError.notFound('Brand not found');
 
   const campaignsPosted = await Campaign.countDocuments({ brand: brand._id });
   const campaigns = await Campaign.find({ brand: brand._id, status: 'open', approvalStatus: { $nin: ['pending', 'rejected'] } })
@@ -102,8 +103,8 @@ const getBrandBySlug = catchAsync(async (req, res) => {
   const sub = await UserSubscription.findOne({ user: brand.user._id }).populate('plan', 'name price');
   const brandWithPlan = {
     ...brand.toObject(),
-    planName: sub ? sub.plan.name : 'Lite',
-    isProPlan: sub ? sub.plan.price > 0 : false,
+    planName: sub?.plan ? sub.plan.name : 'Lite',
+    isProPlan: sub?.plan ? sub.plan.price > 0 : false,
   };
 
   return new ApiResponse(200, { brand: brandWithPlan, campaigns, stats: { campaignsPosted } }, 'Brand profile fetched').send(res);

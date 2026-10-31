@@ -1,3 +1,4 @@
+// File: src/routes/story.routes.js
 const express = require('express');
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.get('/me', ...poster, c.getMyStories);
 router.get('/user/:id', optionalAuth, c.getUserStories);
 router.post('/', ...poster, uploadMedia('fanitt/stories').single('media'), c.createStory);
 router.post('/:id/view', protect, c.markViewed);
+router.post('/:id/react', protect, c.reactToStory);
 router.get('/:id/viewers', protect, c.getViewers);
 router.delete('/:id', protect, c.deleteStory);
 

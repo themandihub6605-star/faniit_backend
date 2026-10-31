@@ -6,6 +6,7 @@ const notificationService = require('../services/notification.service');
 const { alertUser } = require('../services/alert.service');
 const subscriptionService = require('../services/subscription.service');
 const milestoneService = require('../services/milestone.service');
+const billing = require('../services/billing.service');
 const catchAsync = require('../utils/catchAsync');
 const { pinnedIds } = require('../utils/pinnedIds');
 const ApiResponse = require('../utils/apiResponse');
@@ -293,6 +294,8 @@ const publishCampaign = catchAsync(async (req, res) => {
 
   const settings = await SiteSettings.getSingleton();
   assertPublishable(campaign, settings);
+  // Brand ticks the agreement before the campaign goes out (admin can turn this off).
+  const brandAgreement = await billing.acceptAgreement('brand', req.body?.agreementAccepted);
 
   const { sub: brandSub, plan: brandPlan } = await subscriptionService.checkBrandCampaignQuota(req.user._id);
   const needsReview = settings.requireCampaignApproval !== false;
@@ -302,6 +305,7 @@ const publishCampaign = catchAsync(async (req, res) => {
   campaign.isFeatured = brandPlan.isFeaturedListing;
   campaign.submittedForReviewAt = new Date();
   campaign.rejectionReason = '';
+  if (brandAgreement) campaign.brandAgreement = brandAgreement;
   if (needsReview) {
     campaign.approvalStatus = 'pending';
     campaign.publishedAt = null;
@@ -344,7 +348,7 @@ const publishCampaign = catchAsync(async (req, res) => {
 const applyToCampaign = catchAsync(async (req, res) => {
   if (req.user.role !== ROLES.CREATOR) throw ApiError.forbidden('Only creators can apply to campaigns');
 
-  const { pitch, quotedAmount, portfolioLinks, deliveryTimeline } = req.body;
+  const { pitch, quotedAmount, portfolioLinks, deliveryTimeline, agreementAccepted } = req.body;
 
   const campaign = await Campaign.findById(req.params.id);
   if (!campaign) throw ApiError.notFound('Campaign not found');
@@ -395,6 +399,9 @@ const applyToCampaign = catchAsync(async (req, res) => {
   const existing = await Application.findOne({ campaign: campaign._id, creator: creator._id });
   if (existing) throw ApiError.conflict('You have already applied to this campaign');
 
+  // Creator ticks the agreement before bidding (admin can turn this off).
+  const creatorAgreement = await billing.acceptAgreement('creator', agreementAccepted);
+
   const { needsExtraCharge } = await subscriptionService.checkCreatorProposalQuota(req.user._id);
 
   const application = await Application.create({
@@ -404,6 +411,7 @@ const applyToCampaign = catchAsync(async (req, res) => {
     quotedAmount: quotedAmount ?? null,
     portfolioLinks: (portfolioLinks || []).filter(Boolean),
     deliveryTimeline: deliveryTimeline || '',
+    creatorAgreement,
   });
 
   campaign.applicantCount += 1;
@@ -584,11 +592,14 @@ const decideApplication = catchAsync(async (req, res) => {
   if (decision === 'accepted' && campaign.assignedCreator) {
     throw ApiError.conflict('A creator is already hired for this campaign');
   }
+  // Brand ticks the agreement when hiring (admin can turn this off).
+  const brandAgreement = decision === 'accepted' ? await billing.acceptAgreement('brand', req.body.agreementAccepted) : null;
 
   application.status = decision === 'accepted' ? APPLICATION_STATUS.ACCEPTED : APPLICATION_STATUS.REJECTED;
   application.respondedAt = new Date();
   if (feedback) application.feedback = feedback;
   if (decision === 'rejected') application.rejectionReason = rejectionReason.trim();
+  if (brandAgreement) application.brandAgreement = brandAgreement;
   await application.save();
 
   if (decision === 'accepted') {
@@ -660,11 +671,16 @@ const initiateEscrowFunding = catchAsync(async (req, res) => {
   if (!campaign.assignedCreator) throw ApiError.badRequest('Accept a creator before funding escrow');
   if (campaign.isEscrowFunded) throw ApiError.conflict('Escrow has already been funded');
 
-  const order = await paymentService.createOrder(campaign.budget, `campaign_${campaign._id}`, {
+  // GST (if on) is added on top of the budget — the creator still gets the full budget.
+  const breakdown = await billing.brandPaymentBreakdown(campaign.budget);
+  const order = await paymentService.createOrder(breakdown.total, `campaign_${campaign._id}`, {
     campaignId: String(campaign._id),
+    base: String(breakdown.base),
+    gstAmount: String(breakdown.gstAmount),
+    gstPercent: String(breakdown.gstPercent),
   });
 
-  return new ApiResponse(200, { order }, 'Complete payment to fund escrow').send(res);
+  return new ApiResponse(200, { order, breakdown }, 'Complete payment to fund escrow').send(res);
 });
 
 const verifyEscrowPayment = catchAsync(async (req, res) => {
@@ -676,10 +692,16 @@ const verifyEscrowPayment = catchAsync(async (req, res) => {
 
   const isValid = paymentService.verifyPaymentSignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
   if (!isValid) throw ApiError.badRequest('Payment verification failed');
-  // Must have paid exactly the campaign budget.
-  await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId, expectedAmount: campaign.budget });
+  // Must be this campaign's order, for the budget plus the GST we quoted on it.
+  const order = await paymentService.claimOrder({ razorpayOrderId, razorpayPaymentId });
+  const notes = order.notes || {};
+  const gstAmount = Number(notes.gstAmount || 0);
+  const gstPercent = Number(notes.gstPercent || 0);
+  if (String(notes.campaignId) !== String(campaign._id) || Number(order.amount) !== campaign.budget + gstAmount) {
+    throw ApiError.badRequest('Payment amount does not match');
+  }
 
-  await escrowService.fundEscrow({
+  const transaction = await escrowService.fundEscrow({
     campaignId: campaign._id,
     brandUserId: req.user._id,
     amount: campaign.budget,
@@ -689,6 +711,23 @@ const verifyEscrowPayment = catchAsync(async (req, res) => {
 
   campaign.brand.totalSpent += campaign.budget;
   await campaign.brand.save();
+
+  // Tax invoice for the brand (app + email). Never blocks the payment.
+  const invoice = await billing.issueBrandPaymentInvoice({
+    brandUserId: req.user._id,
+    relatedModel: 'Campaign',
+    relatedId: campaign._id,
+    title: `Campaign payment — ${campaign.title}`,
+    lineLabel: `Escrow payment for "${campaign.title}"`,
+    base: campaign.budget,
+    gstPercent,
+    gstAmount,
+    razorpayPaymentId,
+  });
+  if (transaction) {
+    const { Transaction } = require('../models');
+    await Transaction.updateOne({ _id: transaction._id }, { $set: { gstAmount, invoice: invoice?._id || null } });
+  }
 
   return new ApiResponse(200, null, 'Escrow funded — creator can now begin work').send(res);
 });

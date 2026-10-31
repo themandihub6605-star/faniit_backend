@@ -1,5 +1,4 @@
-const { User, CreatorProfile, AgencyProfile, SiteSettings } = require('../models');
-const env = require('../config/env');
+const { User, CreatorProfile, AgencyProfile } = require('../models');
 const { creditReferralCommission } = require('./referral.service');
 
 /**
@@ -66,25 +65,15 @@ async function debitUser(userId, amount) {
   await User.findByIdAndUpdate(userId, { $inc: { walletBalance: -amount } });
 }
 
-/** Platform fee % to apply at withdrawal time — the creator's CURRENT
- * plan (not whatever plan they were on when they originally earned the
- * money). Falls back to the global SiteSettings rate for non-creators or
- * if the plan lookup fails, mirroring the old splitEarnings fallback. */
+/** Platform fee % taken when this user withdraws. Only creators pay one —
+ * their CURRENT plan's fee (Lite / Pro…), or the admin's fallback from
+ * Billing settings. Brands, agencies and fans withdraw without a fee.
+ * Full fee + GST calculation: billing.service.js withdrawalBreakdown. */
 async function getPlatformFeePercentFor(user) {
   const { ROLES } = require('../constants/enums');
-  if (user.role === ROLES.CREATOR) {
-    try {
-      // Lazy require to sidestep the same circular-dependency issue
-      // noted in splitEarnings above.
-      const { getCreatorPlanFields } = require('./subscription.service');
-      const plan = await getCreatorPlanFields(user._id);
-      if (plan?.platformFeePercent != null) return plan.platformFeePercent;
-    } catch {
-      // fall through to site default
-    }
-  }
-  const settings = await SiteSettings.getSingleton().catch(() => null);
-  return settings ? settings.platformCommissionPercent : env.platform.commissionPercent;
+  if (user.role !== ROLES.CREATOR) return 0;
+  // Lazy require — billing.service loads subscription.service, which loads this file.
+  return require('./billing.service').creatorFeePercent(user);
 }
 
 module.exports = { splitEarnings, creditCreator, debitUser, getPlatformFeePercentFor };

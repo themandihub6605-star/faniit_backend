@@ -136,16 +136,20 @@ async function sendAccountRejectedEmail({ to, name, role, reason }) {
 
 // ---------- Password reset ----------
 
-async function sendPasswordResetEmail({ to, name, resetLink }) {
-  await sendEmail({
+/** Code for the app (and a link for the website). Returns true when sent. */
+async function sendPasswordResetEmail({ to, name, otp, resetLink }) {
+  return sendEmail({
     to,
-    subject: 'Reset your Fanitt password',
+    subject: otp ? `${otp} is your Fanitt password reset code` : 'Reset your Fanitt password',
     html: wrapEmail(`
-      <h2>Hi ${name || 'there'},</h2>
-      <p>We received a request to reset your Fanitt password. Click below to set a new one — this link expires in 15 minutes.</p>
-      ${ctaButton(resetLink, 'Reset my password')}
+      <h2>Hi ${escapeHtml(name) || 'there'},</h2>
+      <p>We received a request to reset your Fanitt password. Enter this code in the app:</p>
+      ${otp ? `<div style="margin: 20px 0; padding: 16px; text-align: center; background: #FFF1F4; border-radius: 12px; font-size: 32px; font-weight: bold; letter-spacing: 10px; color: #F9436E;">${otp}</div>` : ''}
+      <p>The code expires in 10 minutes. Do not share it with anyone — Fanitt will never ask you for it.</p>
+      ${resetLink ? `<p style="margin-top: 20px; font-size: 13px; color: #666;">Using the website instead? <a href="${resetLink}" style="color: #F9436E;">Reset it on fanitt.com</a> (link works for 15 minutes).</p>` : ''}
       <p style="margin-top: 20px; font-size: 13px; color: #666;">If you didn't request this, you can safely ignore this email — your password won't be changed.</p>
     `),
+    text: `Your Fanitt password reset code is ${otp}. It expires in 10 minutes. If you didn't request this, ignore this email.`,
   });
 }
 

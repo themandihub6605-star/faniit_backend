@@ -35,4 +35,6 @@ module.exports = {
   Report: require('./Report.model'),
   Block: require('./Block.model'),
   TermsAcceptance: require('./TermsAcceptance.model'),
+  BillingSettings: require('./BillingSettings.model'),
+  Invoice: require('./Invoice.model'),
 };

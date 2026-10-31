@@ -17,7 +17,13 @@ const withdrawalSchema = new mongoose.Schema(
     // changes later while this withdrawal is still pending.
     platformFeePercent: { type: Number, default: 0 },
     platformFee: { type: Number, default: 0 }, // paise — Math.round(amount * platformFeePercent / 100)
-    netPayoutAmount: { type: Number, default: 0 }, // paise — amount - platformFee, what's actually sent to UPI/bank
+    // GST on the platform fee (admin can turn it off) — frozen like the fee.
+    gstPercent: { type: Number, default: 0 },
+    gstAmount: { type: Number, default: 0 }, // paise — Math.round(platformFee * gstPercent / 100)
+    netPayoutAmount: { type: Number, default: 0 }, // paise — amount - platformFee - gstAmount, what's actually sent to UPI/bank
+
+    // Tax invoice for the fee, issued when the payout is marked paid.
+    invoice: { type: mongoose.Schema.Types.ObjectId, ref: 'Invoice', default: null },
 
     payoutMethod: { type: String, enum: ['upi', 'bank'], required: true },
     payoutDetails: { type: String, required: true }, // UPI ID, or "Bank: xxx, IFSC: xxx, Acc: xxx"

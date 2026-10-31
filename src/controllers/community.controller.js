@@ -1109,9 +1109,10 @@ const getConfig = catchAsync(async (req, res) => {
     paid.subscriptionOf(req.user),
     require('../models').CreatorProfile.exists({ user: req.user._id }),
   ]);
+  // Fanitt's fee is taken when the creator withdraws — show their plan's %.
   let feePercent = 0;
   try {
-    feePercent = (await require('../FanittStore/services/settings.service').getSettings()).storeFeePercent || 0;
+    feePercent = isCreator ? await require('../services/billing.service').creatorFeePercent(req.user) : 0;
   } catch {
     feePercent = 0;
   }

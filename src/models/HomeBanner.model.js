@@ -1,7 +1,16 @@
+// File: src/models/HomeBanner.model.js
 const mongoose = require('mongoose');
 
 // Home-screen slider banners, managed from the admin panel.
 // Tap → linkType/linkValue decides where the app (or website) goes.
+//
+// takeover = festival / special banner: while it's live (between startsAt
+// and endsAt) the people it's for see ONLY takeover banners; when it ends,
+// the regular banners come back by themselves.
+//
+// imageHistory = earlier pictures of this banner (newest first), so a
+// replaced image can be put back. archivedAt = "deleted" (hidden, can be
+// restored); only an archived banner can be removed for good.
 
 const LINK_TYPES = ['none', 'screen', 'url', 'campaign', 'creator', 'brand', 'community', 'store', 'product', 'live', 'meet'];
 
@@ -10,10 +19,21 @@ const SCREENS = ['plans', 'wallet', 'referrals', 'store', 'products', 'stores', 
 
 const PLATFORMS = ['all', 'app', 'web'];
 const AUDIENCES = ['creator', 'brand', 'fan', 'agency'];
+const MAX_HISTORY = 10;
 
 const homeBannerSchema = new mongoose.Schema(
   {
     imageUrl: { type: String, required: true },
+    imageHistory: {
+      type: [
+        {
+          _id: false,
+          url: { type: String, required: true },
+          replacedAt: { type: Date, default: Date.now },
+        },
+      ],
+      default: [],
+    },
     // Optional text drawn on the banner (leave empty if the image has text).
     title: { type: String, trim: true, maxlength: 70, default: '' },
     subtitle: { type: String, trim: true, maxlength: 120, default: '' },
@@ -31,6 +51,12 @@ const homeBannerSchema = new mongoose.Schema(
     startsAt: { type: Date, default: null },
     endsAt: { type: Date, default: null },
 
+    // Festival / special: replaces the regular banners while live.
+    takeover: { type: Boolean, default: false },
+
+    // Archived ("deleted") — hidden everywhere, can be restored.
+    archivedAt: { type: Date, default: null },
+
     views: { type: Number, default: 0 },
     clicks: { type: Number, default: 0 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
@@ -47,3 +73,4 @@ module.exports.LINK_TYPES = LINK_TYPES;
 module.exports.SCREENS = SCREENS;
 module.exports.PLATFORMS = PLATFORMS;
 module.exports.AUDIENCES = AUDIENCES;
+module.exports.MAX_HISTORY = MAX_HISTORY;

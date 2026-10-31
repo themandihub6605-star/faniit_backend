@@ -66,6 +66,8 @@ const applyCampaignSchema = z.object({
   quotedAmount: z.number().min(0).optional(),
   portfolioLinks: z.array(z.string().url('Please enter a valid URL')).max(3, 'You can add up to 3 links').optional(),
   deliveryTimeline: z.string().max(100).optional(),
+  // The creator ticked the agreement (required while agreements are on).
+  agreementAccepted: z.boolean().optional(),
 });
 
 module.exports = {

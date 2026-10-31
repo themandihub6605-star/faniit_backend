@@ -1,5 +1,5 @@
 const { User, Transaction, Withdrawal } = require('../models');
-const walletService = require('../services/wallet.service');
+const billing = require('../services/billing.service');
 const catchAsync = require('../utils/catchAsync');
 const ApiResponse = require('../utils/apiResponse');
 const ApiError = require('../utils/apiError');
@@ -23,6 +23,8 @@ const getMyWallet = catchAsync(async (req, res) => {
       // platform fee is calculated and shown only when they withdraw,
       // not baked into this number. See wallet.service.js.
       balance: user.walletBalance,
+      // Creators can't withdraw less than this (paise); 0 for everyone else.
+      minWithdrawal: user.role === 'creator' ? (await billing.getSettings()).creatorMinWithdrawal : 0,
       isPlusMember: user.isPlusMember,
       isFoundingMember: user.isFoundingMember,
       recentTransactions,
@@ -31,29 +33,42 @@ const getMyWallet = catchAsync(async (req, res) => {
   ).send(res);
 });
 
-/** GET /api/wallet/withdraw/preview?amount=<paise> — lets the frontend show
- * "you'll receive ₹X after platform fee" before the user commits to a
- * withdrawal request, using the same fee calculation requestWithdrawal
- * itself will apply. */
+const rupees = (paise) => `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+/** GET /api/wallet/withdraw/preview?amount=<paise> — what the user will
+ * receive: amount − platform fee − GST on the fee (creators only), using the
+ * same calculation requestWithdrawal applies. */
 const previewWithdrawal = catchAsync(async (req, res) => {
-  const amount = Number(req.query.amount);
+  const amount = Math.round(Number(req.query.amount));
   if (!amount || amount <= 0) throw ApiError.badRequest('Enter a valid amount');
 
-  const platformFeePercent = await walletService.getPlatformFeePercentFor(req.user);
-  const platformFee = Math.round((amount * platformFeePercent) / 100);
-  const netPayoutAmount = amount - platformFee;
-
-  return new ApiResponse(200, { amount, platformFeePercent, platformFee, netPayoutAmount }, 'Withdrawal preview').send(res);
+  const user = await User.findById(req.user._id).select('role walletBalance walletFeeExempt');
+  const b = await billing.withdrawalBreakdown(user, amount, { feeExempt: user.walletFeeExempt });
+  return new ApiResponse(
+    200,
+    {
+      amount,
+      platformFeePercent: b.platformFeePercent,
+      platformFee: b.platformFee,
+      gstPercent: b.gstPercent,
+      gstAmount: b.gstAmount,
+      netPayoutAmount: b.netPayoutAmount,
+      minWithdrawal: b.isCreator ? b.minWithdrawal : 0,
+      belowMinimum: b.isCreator && amount < b.minWithdrawal,
+    },
+    'Withdrawal preview'
+  ).send(res);
 });
 
 /** POST /api/wallet/withdraw — the requested (gross) amount is held
  * immediately (deducted from the wallet) so it can't be requested twice;
  * if Admin rejects it, the full requested amount is refunded back to the
- * wallet. Platform fee is calculated once here, from the creator's
- * CURRENT plan, and frozen on the Withdrawal record — it won't change
- * even if their plan changes while this request is still pending. */
+ * wallet. Fanitt's platform fee is taken ONLY here (creators only), from
+ * the creator's CURRENT plan, with GST on the fee — frozen on the Withdrawal
+ * record. The fee invoice is issued when Admin marks it paid. */
 const requestWithdrawal = catchAsync(async (req, res) => {
-  const { amount, payoutMethod, payoutDetails } = req.body;
+  const { payoutMethod, payoutDetails } = req.body;
+  const amount = Math.round(Number(req.body.amount));
   if (!amount || amount <= 0) throw ApiError.badRequest('Enter a valid amount');
   if (!['upi', 'bank'].includes(payoutMethod)) throw ApiError.badRequest('payoutMethod must be upi or bank');
   if (!payoutDetails) throw ApiError.badRequest('Payout details are required');
@@ -61,32 +76,34 @@ const requestWithdrawal = catchAsync(async (req, res) => {
   const user = await User.findById(req.user._id);
   if (user.walletBalance < amount) throw ApiError.badRequest('Insufficient wallet balance');
 
-  const platformFeePercent = await walletService.getPlatformFeePercentFor(user);
-  // Fanitt Store earnings already paid the store fee when the sale happened,
-  // so that part of the balance is withdrawn without a second fee.
-  const feeExemptUsed = Math.min(amount, Math.max(0, user.walletFeeExempt || 0));
-  const platformFee = Math.round(((amount - feeExemptUsed) * platformFeePercent) / 100);
-  const netPayoutAmount = amount - platformFee;
+  const b = await billing.withdrawalBreakdown(user, amount, { feeExempt: user.walletFeeExempt });
+  if (b.isCreator && amount < b.minWithdrawal) {
+    throw ApiError.badRequest(`You can withdraw ${rupees(b.minWithdrawal)} or more at a time`, [], 'BELOW_MIN_WITHDRAWAL');
+  }
+  if (b.netPayoutAmount <= 0) throw ApiError.badRequest('This amount is too small to withdraw after fees');
 
   user.walletBalance -= amount;
-  user.walletFeeExempt = Math.max(0, (user.walletFeeExempt || 0) - feeExemptUsed);
+  user.walletFeeExempt = Math.max(0, (user.walletFeeExempt || 0) - b.feeExemptUsed);
   await user.save();
 
   const withdrawal = await Withdrawal.create({
     user: user._id,
     amount,
-    platformFeePercent,
-    platformFee,
-    netPayoutAmount,
+    platformFeePercent: b.platformFeePercent,
+    platformFee: b.platformFee,
+    gstPercent: b.gstPercent,
+    gstAmount: b.gstAmount,
+    netPayoutAmount: b.netPayoutAmount,
     payoutMethod,
     payoutDetails,
     status: 'initiated',
   });
 
+  const after = b.platformFee > 0 ? (b.gstAmount > 0 ? ', after platform fee and GST' : ', after platform fee') : '';
   return new ApiResponse(
     201,
     withdrawal,
-    `Withdrawal requested — ₹${(netPayoutAmount / 100).toFixed(2)} will be sent to your ${payoutMethod === 'upi' ? 'UPI ID' : 'bank account'} within 48 hours, after platform fee.`
+    `Withdrawal requested — ${rupees(b.netPayoutAmount)} will be sent to your ${payoutMethod === 'upi' ? 'UPI ID' : 'bank account'} within 48 hours${after}.`
   ).send(res);
 });
 

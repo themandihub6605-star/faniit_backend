@@ -1,4 +1,14 @@
-const { Broadcast, Notification, User } = require('../models');
+const mongoose = require('mongoose');
+const {
+  Broadcast,
+  Notification,
+  User,
+  SubscriptionPlan,
+  UserSubscription,
+  CreatorProfile,
+  BrandProfile,
+  AgencyProfile,
+} = require('../models');
 const { getFirebaseAdmin } = require('../config/firebase');
 
 const INSERT_BATCH = 1000;
@@ -9,16 +19,137 @@ const DEAD_TOKEN_CODES = new Set([
   'messaging/invalid-argument',
 ]);
 
-function audienceFilter(broadcast) {
-  if (broadcast.testEmail) return { email: broadcast.testEmail };
-  const filter = { role: { $ne: 'admin' }, isActive: { $ne: false }, isSuspended: { $ne: true } };
-  if (broadcast.roles && broadcast.roles.length) filter.role = { $in: broadcast.roles };
-  return filter;
+const DAY = 24 * 60 * 60 * 1000;
+const ALL_ROLES = ['fan', 'creator', 'brand', 'agency'];
+const PLAN_ROLES = ['creator', 'brand']; // only these have subscription plans
+const PROFILE_ROLES = { creator: CreatorProfile, brand: BrandProfile, agency: AgencyProfile };
+
+const pick = (value, allowed, fallback = 'any') => (allowed.includes(value) ? value : fallback);
+const days = (value) => {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, 3650) : null;
+};
+
+/** Cleans whatever the admin panel sent into a safe filters object. */
+function normalizeFilters(raw) {
+  const f = raw && typeof raw === 'object' ? raw : {};
+  const planIds = Array.isArray(f.planIds)
+    ? [...new Set(f.planIds.map(String).filter((id) => mongoose.isValidObjectId(id)))]
+    : [];
+  let plan = pick(f.plan, Broadcast.PLAN_FILTERS);
+  if (plan === 'plans' && !planIds.length) plan = 'any';
+  return {
+    plan,
+    planIds: plan === 'plans' ? planIds : [],
+    verification: pick(f.verification, Broadcast.VERIFICATION_FILTERS),
+    onboarded: pick(f.onboarded, Broadcast.YES_NO),
+    emailVerified: pick(f.emailVerified, Broadcast.YES_NO),
+    loginWithinDays: days(f.loginWithinDays),
+    inactiveDays: days(f.inactiveDays),
+    joinedWithinDays: days(f.joinedWithinDays),
+    appOnly: f.appOnly === true || f.appOnly === 'true',
+  };
 }
 
-/** How many accounts a broadcast would reach (for the admin preview). */
-async function countAudience({ roles = [], testEmail = '' }) {
-  return User.countDocuments(audienceFilter({ roles, testEmail }));
+/** Users on a paid plan right now (inside the paid period, or auto-renewing). */
+async function paidUserIds(now, extra = {}) {
+  const paidPlans = await SubscriptionPlan.find({ price: { $gt: 0 } }).distinct('_id');
+  if (!paidPlans.length) return [];
+  return UserSubscription.find({
+    plan: { $in: extra.planIds ? paidPlans.filter((id) => extra.planIds.includes(String(id))) : paidPlans },
+    status: { $ne: 'expired' },
+    $or: [
+      { currentPeriodEnd: { $gt: now } },
+      { status: 'active', razorpaySubscriptionId: { $nin: ['', null] }, cancelAtPeriodEnd: { $ne: true } },
+    ],
+  }).distinct('user');
+}
+
+/**
+ * Mongo filter for a broadcast's audience: roles + optional filters
+ * (plan, verification, signup, email, login activity, join date, app).
+ * Built from id lists (no $lookup) so it works on FerretDB too.
+ */
+async function audienceFilter(broadcast) {
+  if (broadcast.testEmail) return { email: broadcast.testEmail };
+  const f = normalizeFilters(broadcast.filters);
+  const now = new Date();
+  const and = [{ isActive: { $ne: false } }, { isSuspended: { $ne: true } }];
+
+  let roles = broadcast.roles && broadcast.roles.length ? [...broadcast.roles] : [...ALL_ROLES];
+  let roleLimited = !!(broadcast.roles && broadcast.roles.length);
+
+  // --- Subscription plan (creators & brands only) ---
+  if (f.plan !== 'any') {
+    roles = roles.filter((r) => PLAN_ROLES.includes(r));
+    roleLimited = true;
+    if (f.plan === 'paid') {
+      and.push({ _id: { $in: await paidUserIds(now) } });
+    } else if (f.plan === 'free') {
+      and.push({ _id: { $nin: await paidUserIds(now) } });
+    } else if (f.plan === 'expiring') {
+      const paid = await paidUserIds(now);
+      const ending = await UserSubscription.find({
+        user: { $in: paid },
+        currentPeriodEnd: { $gt: now, $lte: new Date(now.getTime() + 7 * DAY) },
+        $or: [{ cancelAtPeriodEnd: true }, { razorpaySubscriptionId: { $in: ['', null] } }],
+      }).distinct('user');
+      and.push({ _id: { $in: ending } });
+    } else if (f.plan === 'plans') {
+      const plans = await SubscriptionPlan.find({ _id: { $in: f.planIds } }).select('price appliesTo');
+      roles = roles.filter((r) => plans.some((p) => p.appliesTo === r));
+      const paidSelected = plans.filter((p) => p.price > 0).map((p) => String(p._id));
+      const freeRoles = [...new Set(plans.filter((p) => p.price <= 0).map((p) => p.appliesTo))].filter((r) => roles.includes(r));
+      const or = [];
+      if (paidSelected.length) or.push({ _id: { $in: await paidUserIds(now, { planIds: paidSelected }) } });
+      // A free plan = everyone of that role who isn't paying right now.
+      if (freeRoles.length) or.push({ role: { $in: freeRoles }, _id: { $nin: await paidUserIds(now) } });
+      and.push(or.length ? { $or: or } : { _id: { $in: [] } });
+    }
+  }
+
+  // --- Profile verification (creators, brands, agencies) ---
+  if (f.verification !== 'any') {
+    roles = roles.filter((r) => PROFILE_ROLES[r]);
+    roleLimited = true;
+    const ids = [];
+    for (const r of roles) {
+      // eslint-disable-next-line no-await-in-loop
+      ids.push(...(await PROFILE_ROLES[r].find({ verificationStatus: f.verification }).distinct('user')));
+    }
+    and.push({ _id: { $in: ids } });
+  }
+
+  // --- Account state & activity ---
+  if (f.onboarded === 'yes') and.push({ onboardingCompleted: true });
+  if (f.onboarded === 'no') and.push({ onboardingCompleted: { $ne: true } });
+  if (f.emailVerified === 'yes') and.push({ isEmailVerified: true });
+  if (f.emailVerified === 'no') and.push({ isEmailVerified: { $ne: true } });
+  if (f.loginWithinDays) and.push({ lastLoginAt: { $gte: new Date(now.getTime() - f.loginWithinDays * DAY) } });
+  if (f.inactiveDays) {
+    const cutoff = new Date(now.getTime() - f.inactiveDays * DAY);
+    // Never logged in counts as inactive only if the account itself is older than the cutoff.
+    and.push({ $or: [{ lastLoginAt: { $lt: cutoff } }, { lastLoginAt: null, createdAt: { $lt: cutoff } }] });
+  }
+  if (f.joinedWithinDays) and.push({ createdAt: { $gte: new Date(now.getTime() - f.joinedWithinDays * DAY) } });
+  if (f.appOnly) and.push({ 'pushTokens.token': { $exists: true } });
+
+  and.unshift(roleLimited ? { role: { $in: roles } } : { role: { $ne: 'admin' } });
+  return { $and: and };
+}
+
+/** How many accounts a broadcast would reach, in total and per role (admin preview). */
+async function countAudience({ roles = [], testEmail = '', filters = {} }) {
+  const filter = await audienceFilter({ roles, testEmail, filters });
+  const count = await User.countDocuments(filter);
+  if (testEmail) return { count, byRole: {} };
+  const byRole = {};
+  await Promise.all(
+    ALL_ROLES.map(async (r) => {
+      byRole[r] = count ? await User.countDocuments({ $and: [filter, { role: r }] }) : 0;
+    })
+  );
+  return { count, byRole };
 }
 
 function pushPayload(broadcast, tokens) {
@@ -51,7 +182,7 @@ function pushPayload(broadcast, tokens) {
 async function deliver(broadcast) {
   const stats = { targeted: 0, inApp: 0, devices: 0, pushSent: 0, pushFailed: 0 };
   try {
-    const users = await User.find(audienceFilter(broadcast)).select('_id +pushTokens');
+    const users = await User.find(await audienceFilter(broadcast)).select('_id +pushTokens');
     stats.targeted = users.length;
 
     // In-app notifications (website + app notification lists)
@@ -158,4 +289,4 @@ function startScheduler(intervalMs = 30 * 1000) {
   timer = setInterval(tick, intervalMs);
 }
 
-module.exports = { deliver, runDueBroadcasts, startScheduler, countAudience };
+module.exports = { deliver, runDueBroadcasts, startScheduler, countAudience, normalizeFilters };

@@ -1,3 +1,4 @@
+// File: src/models/Story.model.js
 const mongoose = require('mongoose');
 
 // 24-hour stories by creators and brands: one photo or video each.
@@ -23,6 +24,17 @@ const storySchema = new mongoose.Schema(
     viewers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     viewCount: { type: Number, default: 0 },
 
+    // Emoji reactions from viewers — one per person (a new one replaces the old).
+    reactions: [
+      {
+        _id: false,
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+        emoji: { type: String, required: true },
+        at: { type: Date, default: Date.now },
+      },
+    ],
+    reactionCount: { type: Number, default: 0 },
+
     expiresAt: { type: Date, required: true, default: () => new Date(Date.now() + STORY_HOURS * 60 * 60 * 1000) },
   },
   { timestamps: true }
@@ -32,5 +44,8 @@ storySchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 storySchema.index({ author: 1, createdAt: 1 });
 
 storySchema.statics.HOURS = STORY_HOURS;
+
+// The only emojis a story can get (the app shows the same set).
+storySchema.statics.REACTIONS = ['❤️', '🔥', '😂', '😍', '😮', '👏'];
 
 module.exports = mongoose.models.Story || mongoose.model('Story', storySchema);
