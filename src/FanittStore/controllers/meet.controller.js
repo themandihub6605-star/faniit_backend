@@ -119,6 +119,32 @@ const listMeets = catchAsync(async (req, res) => {
 const getMeet = catchAsync(async (req, res) => {
   const session = await meetRoom.loadSession(req.params.id);
   const access = await meetRoom.access(session, req.user);
+  const { Booking } = require('../../models');
+  const { DECLINE_WINDOW_MS } = require('../../controllers/booking.controller');
+
+  // Booked fan, host just rescheduled → "I won't join" for 30 minutes.
+  const movedAt = session.rescheduledAt ? new Date(session.rescheduledAt).getTime() : 0;
+  if (req.user && !access.isHost && access.booked && movedAt && Date.now() <= movedAt + DECLINE_WINDOW_MS && !session.isLive) {
+    const mine = await Booking.findOne({ session: session._id, user: req.user._id, status: 'confirmed' }).select('_id amountPaid').lean();
+    if (mine) {
+      access.canDecline = true;
+      access.declineUntil = new Date(movedAt + DECLINE_WINDOW_MS);
+      access.bookingId = mine._id;
+      access.refundAmount = mine.amountPaid || 0;
+      access.previousScheduledAt = session.previousScheduledAt || null;
+    }
+  }
+  // Host sees who can't make the new time, with their messages.
+  if (access.isHost) {
+    const declined = await Booking.find({ session: session._id, declinedAt: { $ne: null } }).populate('user', 'name avatarUrl').sort({ declinedAt: -1 }).limit(50).lean();
+    access.declines = declined.map((b) => ({
+      name: b.user?.name || 'Fanitt user',
+      avatarUrl: b.user?.avatarUrl || '',
+      message: b.declineMessage || '',
+      declinedAt: b.declinedAt,
+      refunded: b.refundAmount || 0,
+    }));
+  }
   return new ApiResponse(200, { meet: publicShape(session, { booked: access.booked, isHost: access.isHost }), access }, 'Meet').send(res);
 });
 

@@ -88,8 +88,10 @@ const createSession = catchAsync(async (req, res) => {
   return new ApiResponse(201, session, 'Session created').send(res);
 });
 
-// Edit a session: title, description, cover, length, seats — or postpone it
-// with a new date/time. Everyone who booked is told about a new time.
+// Edit a session: title, description, cover, length, seats — or reschedule it
+// to any new date/time (earlier or later). Everyone who booked is told, and
+// has 30 minutes to say "I won't join" (paid bookings are refunded to their
+// Fanitt wallet — see booking.controller declineBooking).
 const updateSession = catchAsync(async (req, res) => {
   const session = await Session.findById(req.params.id).populate({ path: 'creator', populate: { path: 'user', select: 'name' } });
   if (!session) throw ApiError.notFound('Session not found');
@@ -106,6 +108,12 @@ const updateSession = catchAsync(async (req, res) => {
     }
     if (session.isLive) throw ApiError.badRequest('End the live session before moving it');
     rescheduled = when.getTime() !== new Date(session.scheduledAt).getTime();
+    if (rescheduled) {
+      session.previousScheduledAt = session.scheduledAt;
+      session.rescheduledAt = new Date();
+      // A new time → the "starts in 15 minutes" reminder goes out again.
+      session.reminderSentAt = null;
+    }
     session.scheduledAt = when;
   }
   if (maxParticipants !== undefined && maxParticipants < (session.bookedCount || 0)) {
@@ -120,8 +128,12 @@ const updateSession = catchAsync(async (req, res) => {
 
   if (rescheduled) {
     try {
-      const bookings = await Booking.find({ session: session._id, status: BOOKING_STATUS.CONFIRMED }).select('user');
+      const bookings = await Booking.find({ session: session._id, status: BOOKING_STATUS.CONFIRMED }).select('user amountPaid');
       const when = istText(session.scheduledAt);
+      const optOut = (b) =>
+        b.amountPaid > 0
+          ? ' Can’t make it? Tap within 30 minutes to tell the host — your money comes back to your Fanitt wallet.'
+          : ' Can’t make it? Tap within 30 minutes to let the host know.';
       await Promise.all(
         bookings.map((b) =>
           notificationService
@@ -129,8 +141,8 @@ const updateSession = catchAsync(async (req, res) => {
               userId: b.user,
               fromUser: req.user._id,
               type: 'session_reminder',
-              title: 'Meeting moved to a new time',
-              message: `"${session.title}" by ${session.creator.user.name} is now on ${when}.${rescheduleNote ? ` ${rescheduleNote}` : ''}`,
+              title: 'Session rescheduled ⏰',
+              message: `"${session.title}" by ${session.creator.user.name} is now on ${when}.${rescheduleNote ? ` “${rescheduleNote}”` : ''}${optOut(b)}`,
               relatedModel: 'Session',
               relatedId: session._id,
             })
@@ -142,7 +154,7 @@ const updateSession = catchAsync(async (req, res) => {
     }
   }
 
-  return new ApiResponse(200, session, rescheduled ? 'Session moved — attendees notified' : 'Session updated').send(res);
+  return new ApiResponse(200, session, rescheduled ? 'Session rescheduled — everyone who booked was told' : 'Session updated').send(res);
 });
 
 // Point-Fix: cancelling a session now emails everyone who'd booked it —
@@ -368,6 +380,20 @@ const sessionBookings = catchAsync(async (req, res) => {
     .sort({ createdAt: -1 })
     .lean();
 
+  // People who said "I won't join" after a reschedule, with their message.
+  const declined = await Booking.find({ session: session._id, declinedAt: { $ne: null } })
+    .populate('user', 'name avatarUrl')
+    .sort({ declinedAt: -1 })
+    .lean();
+  const declines = declined.map((b) => ({
+    bookingId: b._id,
+    name: b.user?.name || 'Fanitt user',
+    avatarUrl: b.user?.avatarUrl || '',
+    message: b.declineMessage || '',
+    declinedAt: b.declinedAt,
+    refunded: b.refundAmount || 0,
+  }));
+
   const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
   const people = bookings.map((b) => ({
     bookingId: b._id,
@@ -395,6 +421,7 @@ const sessionBookings = catchAsync(async (req, res) => {
       earned: people.reduce((sum, p) => sum + p.paid, 0),
       bookedToday: people.filter((p) => new Date(p.bookedAt).getTime() > dayAgo).length,
       people,
+      declines,
     },
     'Bookings fetched'
   ).send(res);

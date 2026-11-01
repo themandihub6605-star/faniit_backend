@@ -159,4 +159,38 @@ async function sendData(roomName, payload) {
   }
 }
 
-module.exports = { createToken, ensureRoom, closeRoom, listParticipants, removeParticipant, muteTracks, parseWebhook, isConfigured, sendData };
+/** One person in a room, or null when they're not there. */
+async function getParticipant(roomName, identity) {
+  try {
+    return await rooms().getParticipant(roomName, String(identity));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Lets a viewer send camera + mic (live "Request to join" accepted), or takes
+ * it away again. LiveKit replaces all permissions at once, so every one is set.
+ * Taking publish away also stops their camera and mic for everyone.
+ */
+async function setCanPublish(roomName, identity, canPublish, { canChat = true, role } = {}) {
+  const options = {
+    permission: { canSubscribe: true, canPublish: Boolean(canPublish), canPublishData: Boolean(canChat) },
+  };
+  if (role) options.metadata = JSON.stringify({ role });
+  return rooms().updateParticipant(roomName, String(identity), options);
+}
+
+module.exports = {
+  createToken,
+  ensureRoom,
+  closeRoom,
+  listParticipants,
+  removeParticipant,
+  muteTracks,
+  parseWebhook,
+  isConfigured,
+  sendData,
+  getParticipant,
+  setCanPublish,
+};

@@ -1,3 +1,4 @@
+// File: src/models/Booking.model.js
 const mongoose = require('mongoose');
 const { BOOKING_STATUS } = require('../constants/enums');
 
@@ -15,6 +16,12 @@ const bookingSchema = new mongoose.Schema(
     attended: { type: Boolean, default: false },
 
     reminderSent: { type: Boolean, default: false },
+
+    // "I won't join" after the host moved the session.
+    declinedAt: { type: Date, default: null },
+    declineMessage: { type: String, trim: true, maxlength: 300, default: '' },
+    refundedAt: { type: Date, default: null },
+    refundAmount: { type: Number, default: 0 },
   },
   { timestamps: true }
 );

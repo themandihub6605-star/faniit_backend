@@ -1,5 +1,5 @@
 // File: src/controllers/booking.controller.js
-const { Booking, Session, Transaction } = require('../models');
+const { Booking, Session, Transaction, User, CreatorProfile } = require('../models');
 const paymentService = require('../services/payment.service');
 const walletService = require('../services/wallet.service');
 const notificationService = require('../services/notification.service');
@@ -220,4 +220,98 @@ const cancelBooking = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Booking cancelled').send(res);
 });
 
-module.exports = { createBooking, verifyBookingPayment, getMyBookings, cancelBooking };
+// After a reschedule, booked fans have this long to say "I won't join".
+const DECLINE_WINDOW_MS = 30 * 60 * 1000;
+const rupees = (paise) => `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+/**
+ * PATCH /api/bookings/:id/decline  { message }
+ * "I won't join" — only within 30 minutes of the host rescheduling.
+ * Frees the seat, refunds a paid booking to the fan's Fanitt wallet (taken
+ * back from the host's wallet) and sends the fan's message to the host.
+ */
+const declineBooking = catchAsync(async (req, res) => {
+  const message = String(req.body?.message || '').trim().slice(0, 300);
+  const booking = await Booking.findById(req.params.id).populate({ path: 'session', populate: populateHost });
+  if (!booking) throw ApiError.notFound('Booking not found');
+  if (!booking.user.equals(req.user._id)) throw ApiError.forbidden('This booking does not belong to you');
+  const session = booking.session;
+  if (!session) throw ApiError.notFound('This session no longer exists');
+  if (booking.declinedAt) throw ApiError.conflict('You already told the host you can’t join');
+  if (booking.status !== BOOKING_STATUS.CONFIRMED) throw ApiError.badRequest('This booking is not active');
+  if (session.isCancelled || session.isLive || session.isCompleted) throw ApiError.badRequest('This session can’t be changed now');
+  const movedAt = session.rescheduledAt ? new Date(session.rescheduledAt).getTime() : 0;
+  if (!movedAt || Date.now() > movedAt + DECLINE_WINDOW_MS) {
+    throw ApiError.badRequest('The 30 minutes to opt out after the time change have passed');
+  }
+
+  // Claim it once (double taps / two phones).
+  const claimed = await Booking.findOneAndUpdate(
+    { _id: booking._id, status: BOOKING_STATUS.CONFIRMED, declinedAt: null },
+    { $set: { status: BOOKING_STATUS.CANCELLED, declinedAt: new Date(), declineMessage: message } },
+    { new: true }
+  );
+  if (!claimed) throw ApiError.conflict('You already told the host you can’t join');
+
+  await Session.updateOne({ _id: session._id, bookedCount: { $gt: 0 } }, { $inc: { bookedCount: -1 } });
+
+  const hostUserId = session.creator?.user?._id || session.creator?.user;
+  let refunded = 0;
+  if (booking.amountPaid > 0 && booking.transaction) {
+    const paid = await Transaction.findById(booking.transaction).select('amount netAmount').lean();
+    const amount = paid?.amount || booking.amountPaid;
+    const hostShare = paid ? paid.netAmount || 0 : amount;
+
+    // Fan's own money back → no withdrawal fee on it.
+    await User.updateOne({ _id: req.user._id }, { $inc: { walletBalance: amount, walletFeeExempt: amount } });
+    if (hostShare > 0 && hostUserId) {
+      await User.updateOne({ _id: hostUserId }, { $inc: { walletBalance: -hostShare } });
+      await CreatorProfile.updateOne({ _id: session.creator._id }, { $inc: { totalEarnings: -hostShare, thisMonthEarnings: -hostShare } });
+    }
+    await Transaction.create({
+      type: TRANSACTION_TYPE.REFUND,
+      status: TRANSACTION_STATUS.SUCCESS,
+      from: hostUserId || null,
+      to: req.user._id,
+      amount,
+      netAmount: amount,
+      relatedModel: 'Booking',
+      relatedId: booking._id,
+      notes: `Session refund: "${session.title}" — can't join the new time`.slice(0, 500),
+    });
+    await Booking.updateOne({ _id: booking._id }, { $set: { refundedAt: new Date(), refundAmount: amount } });
+    refunded = amount;
+  }
+
+  // Host: who can't come and why.
+  if (hostUserId) {
+    notificationService
+      .notify({
+        userId: hostUserId,
+        fromUser: req.user._id,
+        type: 'session_booking',
+        title: `${req.user.name || 'Someone'} can’t join "${session.title}"`,
+        message: `${message ? `“${message}”` : 'They can’t make the new time.'}${refunded ? ` · ${rupees(refunded)} refunded to their wallet` : ''}`,
+        relatedModel: 'Session',
+        relatedId: session._id,
+      })
+      .catch(() => {});
+  }
+  // Fan: confirmation.
+  notificationService
+    .notify({
+      userId: req.user._id,
+      type: 'session_booking',
+      title: refunded ? 'Refund added to your wallet' : 'Host informed',
+      message: refunded
+        ? `${rupees(refunded)} for "${session.title}" is back in your Fanitt wallet.`
+        : `We told the host you can’t join "${session.title}".`,
+      relatedModel: 'Session',
+      relatedId: session._id,
+    })
+    .catch(() => {});
+
+  return new ApiResponse(200, { declined: true, refunded }, refunded ? `${rupees(refunded)} refunded to your wallet` : 'The host has been told').send(res);
+});
+
+module.exports = { createBooking, verifyBookingPayment, getMyBookings, cancelBooking, declineBooking, DECLINE_WINDOW_MS };

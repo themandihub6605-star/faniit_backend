@@ -397,6 +397,36 @@ const deleteCommunity = catchAsync(async (req, res) => {
   return new ApiResponse(200, null, 'Community deleted').send(res);
 });
 
+/**
+ * Someone joined a free community: the member gets a welcome, the owner
+ * hears about it (skipped for very big communities). Never throws.
+ */
+function notifyJoined(community, user) {
+  const isOwner = String(community.createdBy) === String(user._id);
+  notificationService
+    .notify({
+      userId: user._id,
+      type: 'community_join_approved',
+      title: `Welcome to ${community.name} 🎉`,
+      message: 'You’re now a member. Say hi to the community!',
+      relatedModel: 'Community',
+      relatedId: community._id,
+    })
+    .catch(() => {});
+  if (isOwner || community.memberCount > 1000) return;
+  notificationService
+    .notify({
+      userId: community.createdBy,
+      fromUser: user._id,
+      type: 'community_join_request',
+      title: `New member in ${community.name} 🎉`,
+      message: `${user.name || 'Someone'} joined · ${community.memberCount} members now.`,
+      relatedModel: 'Community',
+      relatedId: community._id,
+    })
+    .catch(() => {});
+}
+
 /** Join / leave / request / cancel request — one toggle endpoint. */
 const toggleMembership = catchAsync(async (req, res) => {
   const community = await cs.findCommunity(req.params.id);
@@ -440,6 +470,7 @@ const toggleMembership = catchAsync(async (req, res) => {
     await existing.save();
     community.memberCount += 1;
     await community.save();
+    notifyJoined(community, req.user);
     return new ApiResponse(200, { joined: true, status: 'active' }, 'Joined community').send(res);
   }
 
@@ -464,20 +495,7 @@ const toggleMembership = catchAsync(async (req, res) => {
   community.memberCount += 1;
   await community.save();
 
-  // The owner hears about new members (skipped for very big communities).
-  if (community.memberCount <= 1000 && String(community.createdBy) !== String(req.user._id)) {
-    notificationService
-      .notify({
-        userId: community.createdBy,
-        fromUser: req.user._id,
-        type: 'community_join_request',
-        title: `New member in ${community.name} 🎉`,
-        message: `${req.user.name} joined · ${community.memberCount} members now.`,
-        relatedModel: 'Community',
-        relatedId: community._id,
-      })
-      .catch(() => {});
-  }
+  notifyJoined(community, req.user);
   return new ApiResponse(200, { joined: true, status: 'active' }, 'Joined community').send(res);
 });
 

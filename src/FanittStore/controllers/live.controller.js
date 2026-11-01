@@ -9,6 +9,8 @@ const { LIVE_STATUS, LIVE_VISIBILITY, LIVE_PRIVATE_MODE, ORDER_ITEM, ORDER_STATU
 const storeService = require('../services/store.service');
 const liveService = require('../services/live.service');
 const liveAccess = require('../services/liveAccess.service');
+const livekit = require('../services/livekit.service');
+const liveCollab = require('../services/liveCollab.service');
 const orderService = require('../services/order.service');
 const { order: serializeOrder } = require('../utils/serialize');
 const { pageParams } = require('../utils/text');
@@ -417,15 +419,17 @@ const communityLives = catchAsync(async (req, res) => {
 const getLive = catchAsync(async (req, res) => {
   const { live, store } = await loadVisibleLive(req.params.id);
   const access = await liveAccess.checkAccess(live, req.user, { inviteCode: req.query.invite });
+  // Invited creators see Accept / Decline (or "Join as co-host") — even on private lives.
+  const collab = await liveCollab.viewOf(live, req.user?._id);
   // Private lives only show details to people who pass the audience check.
-  if (live.visibility === LIVE_VISIBILITY.PRIVATE && access.reason === 'private') {
+  if (!collab && live.visibility === LIVE_VISIBILITY.PRIVATE && access.reason === 'private') {
     return new ApiResponse(
       200,
       { live: { _id: live._id, title: 'Private live', status: live.status, visibility: live.visibility, privateMode: live.privateMode }, store, access },
       'This live is private'
     ).send(res);
   }
-  return new ApiResponse(200, { live: publicLive(live), store, access }, 'Live fetched').send(res);
+  return new ApiResponse(200, { live: publicLive(live), store, access, collab }, 'Live fetched').send(res);
 });
 
 /** POST /api/store/lives/:id/checkout { payWith?, invite? } — buy a ticket. */
@@ -463,6 +467,11 @@ const joinLive = catchAsync(async (req, res) => {
   if (live.status !== LIVE_STATUS.LIVE) {
     throw ApiError.badRequest(live.status === LIVE_STATUS.SCHEDULED ? "This live hasn't started yet" : 'This live has ended', [], 'LIVE_NOT_RUNNING');
   }
+  // Accepted co-hosts join on screen (no ticket needed).
+  if (liveCollab.isCoHost(live, req.user._id)) {
+    const connection = await liveCollab.cohostToken(live, req.user);
+    return new ApiResponse(200, { live: publicLive(live), connection, role: 'cohost' }, 'Joining as co-host').send(res);
+  }
   const access = await liveAccess.checkAccess(live, req.user, { inviteCode: req.body.invite });
   if (!access.allowed) {
     if (access.needsTicket) throw ApiError.forbidden('Get a ticket to watch this live', [], 'TICKET_REQUIRED');
@@ -472,7 +481,115 @@ const joinLive = catchAsync(async (req, res) => {
   return new ApiResponse(200, { live: publicLive(live), connection, role: access.isHost ? 'host' : 'viewer' }, 'Joining').send(res);
 });
 
+// ---------- "Request to join": one viewer on screen with the host ----------
+//
+// The viewer asks with a LiveKit data message ({ t: 'join_req' }); the host's
+// app shows it with Accept / Decline. Accept calls addGuest, which lets that
+// viewer send camera + mic and tells the room ({ t: 'guest' }, sent by the
+// server so the app trusts it). One guest at a time — accepting someone else
+// takes the stage from the current guest.
+
+/** Takes camera + mic away from a guest and tells the room. Never throws. */
+async function dropGuest(live, identity, reason) {
+  try {
+    await livekit.setCanPublish(live.roomName, identity, false, { canChat: live.chatEnabled, role: 'viewer' });
+  } catch (err) {
+    // They already left the room — nothing to take away.
+    log.warn('live.guest_revoke_failed', { liveId: String(live._id), identity, message: err?.message });
+  }
+  await livekit.sendData(live.roomName, { t: 'guest_end', i: identity, r: reason });
+}
+
+/** POST /api/store/me/lives/:id/guest { identity } — host brings a viewer on screen. */
+const addGuest = catchAsync(async (req, res) => {
+  const live = await loadOwnLive(req.user._id, req.params.id);
+  if (live.status !== LIVE_STATUS.LIVE) throw ApiError.badRequest('Your live isn’t running');
+  const identity = String(req.body?.identity || '').trim();
+  if (!identity) throw ApiError.badRequest('Pick who to bring on screen');
+  if (identity === String(req.user._id)) throw ApiError.badRequest('You’re already on screen');
+
+  const person = await livekit.getParticipant(live.roomName, identity);
+  if (!person) throw ApiError.notFound('They’ve left the live');
+
+  const current = live.coHost?.identity || '';
+  if (current && current !== identity) await dropGuest(live, current, 'replaced');
+
+  await livekit.setCanPublish(live.roomName, identity, true, { canChat: true, role: 'guest' });
+  live.coHost = { identity, name: person.name || 'Guest', since: new Date() };
+  await live.save();
+  await livekit.sendData(live.roomName, { t: 'guest', i: identity, n: live.coHost.name });
+  log.info('live.guest_added', { liveId: String(live._id), identity });
+  return new ApiResponse(200, { coHost: live.coHost }, `${live.coHost.name} is on screen with you`).send(res);
+});
+
+/** POST /api/store/me/lives/:id/guest/remove — host takes the guest off screen. */
+const removeGuest = catchAsync(async (req, res) => {
+  const live = await loadOwnLive(req.user._id, req.params.id);
+  const identity = live.coHost?.identity || '';
+  if (identity) {
+    await dropGuest(live, identity, 'removed');
+    live.coHost = { identity: '', name: '', since: null };
+    await live.save();
+  }
+  return new ApiResponse(200, { coHost: null }, 'Guest removed').send(res);
+});
+
+/** POST /api/store/lives/:id/guest/leave — the guest leaves the stage (keeps watching). */
+const leaveGuest = catchAsync(async (req, res) => {
+  assertObjectId(req.params.id);
+  const live = await LiveStream.findById(req.params.id);
+  if (!live) throw ApiError.notFound('Live not found');
+  if (live.coHost?.identity && live.coHost.identity === String(req.user._id)) {
+    await dropGuest(live, live.coHost.identity, 'left');
+    live.coHost = { identity: '', name: '', since: null };
+    await live.save();
+  }
+  return new ApiResponse(200, { coHost: null }, 'You left the stage').send(res);
+});
+
+// ---------- Collab: go live together with other creators ----------
+
+/** GET /api/store/me/lives/:id/collaborators — who the host invited. */
+const listCollaborators = catchAsync(async (req, res) => {
+  const live = await loadOwnLive(req.user._id, req.params.id);
+  return new ApiResponse(200, { collaborators: await liveCollab.list(live), max: liveCollab.MAX_COHOSTS }, 'Collaborators').send(res);
+});
+
+/** POST /api/store/me/lives/:id/collaborators { userId } — invite a creator. */
+const inviteCollaborator = catchAsync(async (req, res) => {
+  const live = await loadOwnLive(req.user._id, req.params.id);
+  const userId = String(req.body?.userId || '').trim();
+  if (!mongoose.isValidObjectId(userId)) throw ApiError.badRequest('Pick a creator to invite');
+  const collaborators = await liveCollab.invite(live, req.user, userId);
+  return new ApiResponse(200, { collaborators, max: liveCollab.MAX_COHOSTS }, 'Invite sent').send(res);
+});
+
+/** DELETE /api/store/me/lives/:id/collaborators/:userId — remove / cancel invite. */
+const removeCollaborator = catchAsync(async (req, res) => {
+  const live = await loadOwnLive(req.user._id, req.params.id);
+  const collaborators = await liveCollab.remove(live, req.params.userId);
+  return new ApiResponse(200, { collaborators, max: liveCollab.MAX_COHOSTS }, 'Removed').send(res);
+});
+
+/** POST /api/store/lives/:id/collab/respond { accept } — the invited creator answers. */
+const respondCollab = catchAsync(async (req, res) => {
+  assertObjectId(req.params.id);
+  const live = await LiveStream.findById(req.params.id);
+  if (!live) throw ApiError.notFound('Live not found');
+  const result = await liveCollab.respond(live, req.user, Boolean(req.body?.accept));
+  const message =
+    result.status === 'declined' ? 'Invite declined' : result.connection ? 'Joining the live…' : 'Accepted — we’ll tell you when it starts';
+  return new ApiResponse(200, { status: result.status, connection: result.connection, live: publicLive(live) }, message).send(res);
+});
+
 module.exports = {
+  listCollaborators,
+  inviteCollaborator,
+  removeCollaborator,
+  respondCollab,
+  addGuest,
+  removeGuest,
+  leaveGuest,
   publicLive,
   createLive,
   listMyLives,

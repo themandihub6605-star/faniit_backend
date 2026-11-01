@@ -39,6 +39,25 @@ const liveStreamSchema = new mongoose.Schema(
 
     roomName: { type: String, required: true, unique: true },
 
+    // Collab: creators the host invited to go live together (max 2 active).
+    collaborators: [
+      {
+        _id: false,
+        user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+        status: { type: String, enum: ['invited', 'accepted', 'declined', 'removed'], default: 'invited' },
+        invitedAt: { type: Date, default: Date.now },
+        respondedAt: { type: Date, default: null },
+      },
+    ],
+
+    // A viewer the host brought on screen ("Request to join" → Accept).
+    // One at a time; cleared when they leave, are removed or the live ends.
+    coHost: {
+      identity: { type: String, default: '' },
+      name: { type: String, default: '' },
+      since: { type: Date, default: null },
+    },
+
     stats: {
       currentViewers: { type: Number, default: 0 },
       peakViewers: { type: Number, default: 0 },

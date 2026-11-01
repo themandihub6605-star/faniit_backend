@@ -1,13 +1,15 @@
 const { Store, StoreOrder, StoreDailyStat, StoreVisit, AffiliateProduct, AffiliateEarning, AffiliateClick, LiveStream, CallSession } = require('../models');
 const { ORDER_STATUS, ORDER_ITEM, CALL_STATUS, AFFILIATE_EARNING_STATUS } = require('../constants');
 const log = require('../utils/logger');
+const { SESSION_ITEM, sessionOrders } = require('./sessionSales.service');
 
 // Store analytics. Totals are computed in JS over the chosen date range
 // (orders are fetched with only the fields needed), which keeps the maths
 // easy to read and identical on every MongoDB version.
 
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-const SOURCES = [ORDER_ITEM.DIGITAL_PRODUCT, ORDER_ITEM.LIVE_STREAM, ORDER_ITEM.CALL, ORDER_ITEM.FANBOX];
+// `session` = live session (Virtual Meet) bookings, which are paid outside StoreOrder.
+const SOURCES = [ORDER_ITEM.DIGITAL_PRODUCT, ORDER_ITEM.LIVE_STREAM, ORDER_ITEM.CALL, ORDER_ITEM.FANBOX, SESSION_ITEM];
 
 /** India calendar day "YYYY-MM-DD" for a date. */
 function istDay(date = new Date()) {
@@ -109,10 +111,11 @@ async function creatorAnalytics(store, days) {
   const fromDay = istDay(from);
   const daysMap = emptyDays(from, days);
 
-  const [orders, dailyStats, visits, lives, calls, affiliateTop, affiliateEarnings, affiliateClicks] = await Promise.all([
+  const [storeOrders, sessions, dailyStats, visits, lives, calls, affiliateTop, affiliateEarnings, affiliateClicks] = await Promise.all([
     StoreOrder.find({ seller: store.user, status: ORDER_STATUS.PAID, paidAt: { $gte: from } }).select(
       'itemType itemId itemTitle amount settledAmount feeAmount creatorEarning paidAt buyer'
     ),
+    sessionOrders(store.user, { from }),
     StoreDailyStat.find({ store: store._id, day: { $gte: fromDay } }),
     StoreVisit.find({ store: store._id, day: { $gte: fromDay } }).select('day visitor'),
     LiveStream.find({ host: store.user, startedAt: { $gte: from } }).select('title stats startedAt'),
@@ -122,6 +125,7 @@ async function creatorAnalytics(store, days) {
     AffiliateClick.countDocuments({ store: store._id, day: { $gte: fromDay } }),
   ]);
 
+  const orders = [...storeOrders, ...sessions];
   const { totals, bySource } = summarizeOrders(orders, daysMap);
 
   dailyStats.forEach((s) => {

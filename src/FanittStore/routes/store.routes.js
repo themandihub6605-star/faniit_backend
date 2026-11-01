@@ -78,6 +78,11 @@ router.patch('/me/lives/:id', ...creatorOnly, validate(v.liveUpdateSchema), live
 router.post('/me/lives/:id/cover', ...creatorOnly, image, live.uploadLiveCover);
 router.post('/me/lives/:id/start', ...creatorOnly, live.startLive);
 router.post('/me/lives/:id/end', ...creatorOnly, live.endLive);
+router.post('/me/lives/:id/guest', ...creatorOnly, live.addGuest); // "Request to join" → Accept
+router.post('/me/lives/:id/guest/remove', ...creatorOnly, live.removeGuest);
+router.get('/me/lives/:id/collaborators', ...creatorOnly, live.listCollaborators); // collab lives
+router.post('/me/lives/:id/collaborators', ...creatorOnly, live.inviteCollaborator);
+router.delete('/me/lives/:id/collaborators/:userId', ...creatorOnly, live.removeCollaborator);
 router.post('/me/lives/:id/cancel', ...creatorOnly, validate(v.reasonSchema), live.cancelLive);
 router.get('/me/lives/:id/attendance', ...creatorOnly, meetHost.liveAttendance);
 
@@ -113,6 +118,8 @@ router.get('/me/customers', ...creatorOnly, analytics.getMyCustomers);
 router.post('/products/:id/checkout', protect, validate(v.checkoutSchema), shop.checkout);
 router.post('/lives/:id/checkout', protect, validate(v.checkoutSchema), live.buyTicket);
 router.post('/lives/:id/join', protect, validate(v.joinLiveSchema), live.joinLive);
+router.post('/lives/:id/guest/leave', protect, live.leaveGuest);
+router.post('/lives/:id/collab/respond', protect, live.respondCollab);
 router.post('/stores/:storeId/calls', protect, validate(v.callRequestSchema), call.requestCall);
 router.post('/fanbox', protect, validate(v.fanboxSchema), fanbox.send);
 router.get('/fanbox/sent', protect, fanbox.listSent);

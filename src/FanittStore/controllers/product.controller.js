@@ -9,6 +9,7 @@ const storeService = require('../services/store.service');
 const storage = require('../services/storage.service');
 const { product: serializeProduct, order: serializeOrder } = require('../utils/serialize');
 const { pageParams } = require('../utils/text');
+const sessionSales = require('../services/sessionSales.service');
 const log = require('../utils/logger');
 
 // Creator side: build, publish and track digital products.
@@ -235,13 +236,18 @@ const deleteProduct = catchAsync(async (req, res) => {
 const listMySales = catchAsync(async (req, res) => {
   const { page, limit, skip } = pageParams(req.query);
   const filter = { seller: req.user._id, status: { $in: [ORDER_STATUS.PAID, ORDER_STATUS.REFUNDED] } };
-  const [orders, total] = await Promise.all([
-    StoreOrder.find(filter).populate('buyer', 'name avatarUrl').sort({ paidAt: -1, createdAt: -1 }).skip(skip).limit(limit),
+  // Store orders and live session bookings in one list, newest first.
+  // Both lists are read up to the end of this page, merged, then cut.
+  const upTo = skip + limit;
+  const [orders, orderCount, sessions] = await Promise.all([
+    StoreOrder.find(filter).populate('buyer', 'name avatarUrl').sort({ paidAt: -1, createdAt: -1 }).limit(upTo),
     StoreOrder.countDocuments(filter),
+    sessionSales.sessionOrders(req.user._id, { withBuyer: true, includeRefunded: true }),
   ]);
-  return new ApiResponse(200, { orders: orders.map(serializeOrder), total, page, pages: Math.ceil(total / limit) }, 'Sales fetched').send(
-    res
-  );
+  const time = (o) => new Date(o.paidAt || o.createdAt || 0).getTime();
+  const merged = [...orders.map(serializeOrder), ...sessions].sort((a, b) => time(b) - time(a)).slice(skip, upTo);
+  const total = orderCount + sessions.length;
+  return new ApiResponse(200, { orders: merged, total, page, pages: Math.ceil(total / limit) }, 'Sales fetched').send(res);
 });
 
 /** GET /api/store/me/summary — earnings overview for the store dashboard. */
@@ -251,8 +257,10 @@ const getMySummary = catchAsync(async (req, res) => {
   since.setDate(since.getDate() - 29);
   since.setHours(0, 0, 0, 0);
 
-  const [recentOrders, topProducts, productCounts] = await Promise.all([
+  const [storeOrders, recentSessions, stats, topProducts, productCounts] = await Promise.all([
     StoreOrder.find({ seller: req.user._id, status: ORDER_STATUS.PAID, paidAt: { $gte: since } }).select('paidAt amount creatorEarning'),
+    sessionSales.sessionOrders(req.user._id, { from: since }),
+    sessionSales.statsWithSessions(store, req.user._id),
     DigitalProduct.find({ owner: req.user._id, salesCount: { $gt: 0 } })
       .sort({ revenue: -1 })
       .limit(5)
@@ -260,7 +268,9 @@ const getMySummary = catchAsync(async (req, res) => {
     DigitalProduct.aggregate([{ $match: { owner: req.user._id } }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
   ]);
 
-  // Daily totals for the last 30 days, by India date.
+  const recentOrders = [...storeOrders, ...recentSessions];
+
+  // Daily totals for the last 30 days, by India date (live sessions included).
   const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
   const days = new Map();
   for (let i = 0; i < 30; i += 1) {
@@ -272,7 +282,7 @@ const getMySummary = catchAsync(async (req, res) => {
     const day = days.get(d) || { date: d, orders: 0, gross: 0, net: 0 };
     day.orders += 1;
     day.gross += o.amount;
-    day.net += o.creatorEarning;
+    day.net += o.creatorEarning || 0;
     days.set(d, day);
   });
   const byDay = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
@@ -280,7 +290,7 @@ const getMySummary = catchAsync(async (req, res) => {
   return new ApiResponse(
     200,
     {
-      stats: store.stats,
+      stats,
       last30Days: byDay,
       topProducts,
       products: Object.fromEntries(productCounts.map((p) => [p._id, p.count])),

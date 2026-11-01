@@ -149,6 +149,8 @@ async function start(live, user) {
   // Tell followers (ticket holders already got a message above).
   const skip = new Set(holders.map((o) => String(o.buyer)));
   notifyFollowers(started, user?.name, skip);
+  // Collab: co-hosts get "join now", their followers "live together".
+  require('./liveCollab.service').notifyStarted(started, user?.name);
 
   return token;
 }

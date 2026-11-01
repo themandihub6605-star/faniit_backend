@@ -7,6 +7,7 @@ const storeService = require('../services/store.service');
 const settingsService = require('../services/settings.service');
 const storage = require('../services/storage.service');
 const { ownerStore } = require('../utils/serialize');
+const sessionSales = require('../services/sessionSales.service');
 const log = require('../utils/logger');
 const subscriptionService = require('../../services/subscription.service');
 
@@ -31,10 +32,13 @@ async function respondWithMyStore(res, userId, message, status = 200) {
     settingsService.getSettings(),
     subscriptionOf(userId),
   ]);
+  // Live session bookings count as store earnings too (one total everywhere).
+  const out = ownerStore(store);
+  if (out) out.stats = await sessionSales.statsWithSessions(store, userId);
   return new ApiResponse(
     status,
     {
-      store: ownerStore(store),
+      store: out,
       steps: storeService.setupSteps(store, settings),
       terms: { version: settings.termsVersion, text: settings.termsText },
       fees: { storeFeePercent: settings.storeFeePercent, fanboxFeePercent: settings.fanboxFeePercent },

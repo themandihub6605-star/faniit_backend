@@ -38,6 +38,11 @@ const sessionSchema = new mongoose.Schema(
     recordingAvailable: { type: Boolean, default: false },
 
     bookedCount: { type: Number, default: 0 },
+
+    // Reschedule: when the time last changed (booked fans then have 30 min
+    // to say "I won't join" and get their money back in their wallet).
+    rescheduledAt: { type: Date, default: null },
+    previousScheduledAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
