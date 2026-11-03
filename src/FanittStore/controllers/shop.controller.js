@@ -19,6 +19,8 @@ const { FANBOX } = require('../constants');
 const { publicStore, product: serializeProduct, order: serializeOrder } = require('../utils/serialize');
 const { pageParams, escapeRegex } = require('../utils/text');
 const { publicLive } = require('./live.controller');
+const { communitiesOf } = require('../../utils/publicCommunities');
+const CreatorProfile = require('../../models/CreatorProfile.model');
 
 // Everyone else: browse stores, buy, and use what they bought.
 
@@ -118,7 +120,7 @@ async function findVisibleStore(slugOrUserId) {
 const getStore = catchAsync(async (req, res) => {
   const store = await findVisibleStore(req.params.slugOrUserId);
   const isOwner = req.user && String(req.user._id) === String(store.user);
-  const [products, lives, meets, calls, affiliate, settings] = await Promise.all([
+  const [products, lives, meets, calls, affiliate, settings, communities, creatorProfile] = await Promise.all([
     DigitalProduct.find({ store: store._id, status: PRODUCT_STATUS.PUBLISHED }).sort({ publishedAt: -1 }),
     LiveStream.find({
       store: store._id,
@@ -131,6 +133,9 @@ const getStore = catchAsync(async (req, res) => {
     callService.publicCallInfo(store),
     storefrontFor(store._id),
     settingsService.getSettings(),
+    // The owner's communities + profile link (website store page).
+    communitiesOf(store.user),
+    CreatorProfile.findById(store.creator).select('slug').lean(),
   ]);
 
   if (!isOwner) {
@@ -159,6 +164,8 @@ const getStore = catchAsync(async (req, res) => {
       calls,
       affiliate,
       fanbox: { presets: FANBOX.PRESETS, minAmount: FANBOX.MIN_AMOUNT, maxAmount: FANBOX.MAX_AMOUNT, feePercent: settings.fanboxFeePercent },
+      communities,
+      creatorSlug: creatorProfile?.slug || '',
     },
     'Store fetched'
   ).send(res);

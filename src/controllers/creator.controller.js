@@ -6,6 +6,7 @@ const { ROLES, TRANSACTION_TYPE, TRANSACTION_STATUS } = require('../constants/en
 const { VERIFICATION_STATUS } = require('../constants/enums');
 const notificationService = require('../services/notification.service');
 const { pinnedIds } = require('../utils/pinnedIds');
+const { communitiesOf } = require('../utils/publicCommunities');
 
 const listCreators = catchAsync(async (req, res) => {
   const { category, location, minFollowers, search, page = 1, limit = 20 } = req.query;
@@ -100,10 +101,12 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
   // Extra profile info for the app: their Fanitt Store and post / reel counts.
   const Store = require('../FanittStore/models/Store.model');
   const { Post } = require('../models');
-  const [store, postCount, reelCount] = await Promise.all([
+  const [store, postCount, reelCount, communities] = await Promise.all([
     Store.findOne({ user: creator.user._id, status: 'active' }).select('slug name logoUrl tagline isOpen'),
     Post.countDocuments({ creator: creator._id, kind: { $ne: 'reel' } }),
     Post.countDocuments({ creator: creator._id, kind: 'reel' }),
+    // Their communities (website profile page shows them too).
+    communitiesOf(creator.user._id),
   ]);
   const { followers, ...publicCreator } = creatorWithPlan; // never send the follower list
 
@@ -114,6 +117,7 @@ const getCreatorBySlug = catchAsync(async (req, res) => {
       sessions,
       reviews,
       store: store ? { slug: store.slug, name: store.name, logoUrl: store.logoUrl, tagline: store.tagline, isOpen: store.isOpen } : null,
+      communities,
       stats: { projectsCompletedCount, posts: postCount, reels: reelCount, profileViews: creator.profileViews || 0 },
     },
     'Creator profile fetched'
