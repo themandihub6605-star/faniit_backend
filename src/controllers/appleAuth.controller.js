@@ -49,6 +49,33 @@ async function getProfileStatus(user) {
 
 const cleanName = (v) => String(v || '').replace(/\s+/g, ' ').trim().slice(0, 60);
 
+/**
+ * The person's email for this Apple sign-in. Apple only puts the email in
+ * the token reliably the first time someone signs in, so fall back to:
+ *   1. the email in the Firebase ID token
+ *   2. the email saved on the Firebase user (or its Apple provider entry)
+ *   3. a stable stand-in built from Apple's user id — same person, same
+ *      Fanitt account every time, even if Apple never shares an email.
+ */
+async function resolveAppleEmail(admin, decoded) {
+  const fromToken = String(decoded.email || '').trim().toLowerCase();
+  if (fromToken) return fromToken;
+
+  try {
+    const fbUser = await admin.auth().getUser(decoded.uid);
+    const appleEntry = (fbUser.providerData || []).find((p) => p.providerId === 'apple.com');
+    const saved = String(fbUser.email || appleEntry?.email || '').trim().toLowerCase();
+    if (saved) return saved;
+  } catch {
+    // Firebase lookup failed — use the stand-in below.
+  }
+
+  const appleId = decoded.firebase?.identities?.['apple.com']?.[0] || decoded.uid;
+  if (!appleId) return '';
+  const safe = String(appleId).toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 40);
+  return safe ? `apple.${safe}@privaterelay.appleid.com` : '';
+}
+
 exports.appleAuth = catchAsync(async (req, res) => {
   const { idToken, role: requestedRole, referralCode } = req.body || {};
   if (!idToken) throw ApiError.badRequest('Missing Apple sign-in token');
@@ -62,8 +89,8 @@ exports.appleAuth = catchAsync(async (req, res) => {
   }
   if (decoded.firebase?.sign_in_provider !== 'apple.com') throw ApiError.badRequest('This is not an Apple sign-in');
 
-  const email = String(decoded.email || '').toLowerCase();
-  if (!email) throw ApiError.badRequest('Apple didn’t share an email. Please allow email when you sign in with Apple.');
+  const email = await resolveAppleEmail(getFirebaseAdmin(), decoded);
+  if (!email) throw ApiError.badRequest('Apple sign-in failed. Please try again.');
 
   let user = await User.findOne({ email });
   const isNewUser = !user;
