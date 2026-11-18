@@ -9,7 +9,7 @@ const ApiResponse = require('../utils/apiResponse');
 // Connect a WhatsApp Business number with Meta's Embedded Signup and send
 // messages from it. Used by fanitt.com/connect/whatsapp.
 //
-//   POST   /whatsapp/connect            { code, wabaId, phoneNumberId }
+//   POST   /whatsapp/connect            { code, wabaId, phoneNumberId, coexistence? }
 //   GET    /whatsapp/connect/me         connected number + recent messages
 //   POST   /whatsapp/connect/send       { to, text? }  (no text → hello_world template)
 //   GET    /whatsapp/connect/templates  message templates of the account
@@ -39,6 +39,8 @@ async function loadAccount(userId) {
 // POST /whatsapp/connect
 const connect = catchAsync(async (req, res) => {
   const { code, wabaId, phoneNumberId } = req.body || {};
+  // true = the number stays on the WhatsApp Business app (Meta "coexistence").
+  const coexistence = req.body?.coexistence === true;
   if (!code || !wabaId || !phoneNumberId) throw ApiError.badRequest('code, wabaId and phoneNumberId are required');
   if (!process.env.META_APP_ID || !process.env.META_APP_SECRET) {
     throw new ApiError(503, 'WhatsApp connect is not set up on the server yet');
@@ -68,7 +70,8 @@ const connect = catchAsync(async (req, res) => {
   }
 
   // 3. Register the number for the Cloud API (already registered / test numbers can fail — fine).
-  try {
+  //    Not for a WhatsApp Business app number — registering would log the app out.
+  if (!coexistence) try {
     const pin = String(crypto.randomInt(100000, 1000000));
     await axios.post(`${GRAPH()}/${phoneNumberId}/register`, { messaging_product: 'whatsapp', pin }, auth);
   } catch (err) {
