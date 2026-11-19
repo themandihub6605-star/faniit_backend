@@ -8,6 +8,8 @@ router.use(monitor.tracker);
 
 // Public webhook routes (no auth) — keep at top
 router.use('/whatsapp', require('./whatsapp.routes'));
+// Instagram connect + Auto DM (webhook verification is public).
+router.use('/instagram', require('./instagram.routes'));
 
 // Website (fanitt.com) login with an email code.
 router.use('/auth/web', require('./webAuth.routes'));

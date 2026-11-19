@@ -58,6 +58,22 @@ app.post(
 // --- Fanitt Store: LiveKit webhook, also verified against the RAW body ---
 app.post('/api/store/livekit/webhook', express.raw({ type: '*/*', limit: '1mb' }), require('./FanittStore').liveKitWebhook);
 
+// --- Instagram webhook (Auto DM): signature is checked on the RAW body ---
+app.post(
+  '/api/instagram/webhook',
+  express.raw({ type: '*/*', limit: '1mb' }),
+  (req, res, next) => {
+    req.rawBody = req.body; // Buffer
+    try {
+      req.body = JSON.parse(req.body.toString('utf8') || '{}');
+    } catch {
+      req.body = {};
+    }
+    next();
+  },
+  require('./controllers/instagram.controller').receiveWebhook
+);
+
 // --- standard body parsing for everything else ---
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '1mb' }));
