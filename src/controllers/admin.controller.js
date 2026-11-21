@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const {
   User,
   CreatorProfile,
@@ -54,8 +55,38 @@ const DAY = 24 * 60 * 60 * 1000;
  *  &joined= today | 7d | 30d
  *  &provider= google | local
  *  Each row also carries `profileSummary` (status, missing fields, %). */
+/** Plan shown for each brand/creator in the admin Users list. Users with no
+ * subscription record are on their role's default (free) plan. */
+async function planSummaries(users) {
+  const ids = users.filter((u) => u.role === ROLES.BRAND || u.role === ROLES.CREATOR).map((u) => u._id);
+  if (!ids.length) return {};
+  const [subs, defaults] = await Promise.all([
+    UserSubscription.find({ user: { $in: ids } }).populate('plan', 'name slug appliesTo billingCycle isDefault'),
+    SubscriptionPlan.find({ isDefault: true }).select('name slug appliesTo billingCycle isDefault'),
+  ]);
+  const byUser = Object.fromEntries(subs.map((s) => [String(s.user), s]));
+  const defaultFor = Object.fromEntries(defaults.map((p) => [p.appliesTo, p]));
+  const out = {};
+  for (const u of users) {
+    if (u.role !== ROLES.BRAND && u.role !== ROLES.CREATOR) continue;
+    const sub = byUser[String(u._id)];
+    const plan = sub?.plan || defaultFor[u.role];
+    if (!plan) continue;
+    out[String(u._id)] = {
+      planId: String(plan._id),
+      name: plan.name,
+      slug: plan.slug,
+      billingCycle: plan.billingCycle,
+      isDefault: !!plan.isDefault,
+      status: sub ? sub.status : 'active',
+      currentPeriodEnd: sub ? sub.currentPeriodEnd : null,
+    };
+  }
+  return out;
+}
+
 const listUsers = catchAsync(async (req, res) => {
-  const { role, search, profile, joined, provider } = req.query;
+  const { role, search, profile, joined, provider, planId } = req.query;
   const page = Math.max(1, Number(req.query.page) || 1);
   const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
 
@@ -80,12 +111,33 @@ const listUsers = catchAsync(async (req, res) => {
     if (ids) filter._id = { $in: ids };
   }
 
+  // ?planId= — users on that plan. Users with no subscription record count
+  // as being on their role's default (free) plan.
+  if (planId && mongoose.isValidObjectId(planId)) {
+    const plan = await SubscriptionPlan.findById(planId);
+    if (plan) {
+      const and = filter.$and || [];
+      if (plan.isDefault) {
+        const onOther = await UserSubscription.find({ plan: { $ne: plan._id } }).distinct('user');
+        and.push({ role: plan.appliesTo }, { _id: { $nin: onOther } });
+      } else {
+        const onThis = await UserSubscription.find({ plan: plan._id }).distinct('user');
+        and.push({ _id: { $in: onThis } });
+      }
+      filter.$and = and;
+    }
+  }
+
   const [users, total] = await Promise.all([
     User.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit),
     User.countDocuments(filter),
   ]);
-  const summaries = await profileCheck.summarize(users);
-  const rows = users.map((u) => ({ ...u.toObject(), profileSummary: summaries[String(u._id)] ?? null }));
+  const [summaries, plans] = await Promise.all([profileCheck.summarize(users), planSummaries(users)]);
+  const rows = users.map((u) => ({
+    ...u.toObject(),
+    profileSummary: summaries[String(u._id)] ?? null,
+    plan: plans[String(u._id)] ?? null,
+  }));
 
   return new ApiResponse(200, { users: rows, total, page, pages: Math.max(1, Math.ceil(total / limit)) }, 'Users fetched').send(res);
 });
